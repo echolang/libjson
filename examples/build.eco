@@ -1,0 +1,12 @@
+// construct a document and print it.
+//
+//   echoc run -m . examples/build.eco
+
+json::Value $user = json::object();
+$user['name'] = 'mario';
+$user['id'] = 32;
+$user['tags'] = json::arr();
+$user['tags'][] = 'echo';
+$user['tags'][] = 'json';
+
+echo json::pretty($user);

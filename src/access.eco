@@ -1,0 +1,45 @@
+/**
+ * `[]` and `[]=` over a `Value`.
+ *
+ * Echo lets a type declare **both** contracts. The *position* chooses, which is what
+ * `tests_eco/operators/index_write_read_and_borrow.eco` exists to pin:
+ *
+ *     $v['name'] = 'mario';     the write contract (`[]=`)
+ *     echo $v['name']->asStr(); the borrow contract (`[]` returns `Value&`)
+ *
+ * An index operator has to return a place (`T&`), not a `Value?`. A missing key has no slot, so
+ * the place is a shared JSON `null`. That is how `$v['nope']->asStr()` answers without inserting.
+ * `get` / `at` still return Echo `null` when you need to tell "missing" from JSON `null`.
+ *
+ * The write side takes a `Value`. A bare `1`, `'mario'`, `true` or `1.5` becomes one through the
+ * inbound `#[implicit]` conversions on `Value`, so this file does not grow a row per primitive.
+ *
+ * Operators register in the root namespace with no visibility modifier - the symbol is global.
+ */
+
+namespace json;
+
+operator (Value $obj)[const string& $key] : Value&
+{
+    return $obj->slot($key);
+}
+
+operator (Value $obj)[usize $i] : Value&
+{
+    return $obj->slotAt($i);
+}
+
+operator (Value& $obj)[const string& $key] = (Value $value) : void
+{
+    $obj->set($key, $value);
+}
+
+operator (Value& $obj)[usize $i] = (Value $value) : void
+{
+    $obj->setAt($i, $value);
+}
+
+operator (Value& $obj)[] = (Value $value) : void
+{
+    $obj->push($value);
+}

@@ -1,0 +1,114 @@
+/**
+ * Why the text was not JSON.
+ *
+ * An enum, so `guard` / `match` is the call site:
+ *
+ *     guard json::parse($text) else ($e) {
+ *         match ($e) {
+ *             .tooBig($at) => { ... },
+ *             else => { die("{$e}"); },
+ *         }
+ *     }
+ *
+ * Named cases are the ways this parser refuses input. There is no leftover: the set is closed,
+ * and we construct the case ourselves. Curl has `from` / `other` / `value` because CURLcodes
+ * arrive from C. These do not.
+ *
+ * Every case carries a `Place` — line / column / offset of the offending byte. The sentence
+ * comes from the case (`message()`, and `"{$e}"` via `str::from`), not from a string stored
+ * beside it.
+ */
+
+namespace json;
+
+/**
+ * Where the offending byte sat.
+ *
+ * Interpolating the error is enough to find it. The fields are here for a `match` arm that
+ * wants the numbers.
+ */
+public struct Place
+{
+    /** 1-based line of the offending byte. */
+    public const int64 $line;
+
+    /** 1-based column, counted in bytes. */
+    public const int64 $column;
+
+    /** 0-based byte index into the input. */
+    public const int64 $offset;
+}
+
+public enum Error
+{
+    case unexpected(Place $at);
+    case unterminated(Place $at);
+    case badEscape(Place $at);
+    case badUtf8(Place $at);
+    case badNumber(Place $at);
+    case tooBig(Place $at);
+    case tooDeep(Place $at);
+    case trailing(Place $at);
+    case empty(Place $at);
+
+    /**
+     * What went wrong, in words, including the place.
+     */
+    const function message() : string
+    {
+        string $lead = match ($this) {
+            Error::unexpected($at) => 'unexpected token',
+            Error::unterminated($at) => 'unterminated value',
+            Error::badEscape($at) => 'invalid escape',
+            Error::badUtf8($at) => 'invalid UTF-8',
+            Error::badNumber($at) => 'invalid number',
+            Error::tooBig($at) => 'number too large',
+            Error::tooDeep($at) => 'nesting too deep',
+            Error::trailing($at) => 'trailing data',
+            Error::empty($at) => 'empty input',
+        };
+
+        Place $at = $this->at();
+
+        return "{$lead} at {$at->line}:{$at->column}";
+    }
+
+    /**
+     * 1-based line of the offending byte.
+     */
+    const function line() : int64
+    {
+        return $this->at()->line;
+    }
+
+    /**
+     * 1-based column, counted in bytes.
+     */
+    const function column() : int64
+    {
+        return $this->at()->column;
+    }
+
+    /**
+     * 0-based byte index into the input.
+     */
+    const function offset() : int64
+    {
+        return $this->at()->offset;
+    }
+
+    private const function at() : Place
+    {
+        return match ($this) {
+            Error::unexpected($at) => $at,
+            Error::unterminated($at) => $at,
+            Error::badEscape($at) => $at,
+            Error::badUtf8($at) => $at,
+            Error::badNumber($at) => $at,
+            Error::tooBig($at) => $at,
+            Error::tooDeep($at) => $at,
+            Error::trailing($at) => $at,
+            Error::empty($at) => $at,
+        };
+    }
+}

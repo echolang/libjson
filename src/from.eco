@@ -1,0 +1,22 @@
+/**
+ * `str::from` for this library's types, so `"{$e}"` and `"{$v}"` work.
+ *
+ * A file of its own **because a namespace is a property of the file**: `error.eco` is
+ * `namespace json;` and cannot also be `namespace str;`.
+ *
+ * String interpolation lowers every hole to a unary `str::from` call, minted *by name* into
+ * namespace `str` - so declaring an overload here is the whole of what a type owes to be
+ * interpolatable.
+ */
+
+namespace str;
+
+public function from(const json::Error& $e) : string
+{
+    return $e->message();
+}
+
+public function from(json::Value $v) : string
+{
+    return json::dump($v);
+}

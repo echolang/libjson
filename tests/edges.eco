@@ -1,0 +1,509 @@
+/**
+ * Hostile and malformed input: broken punctuation, truncated tokens at EOF,
+ * integer / float overflow, nesting at the cap, and invalid UTF-8.
+ *
+ * `mustParse` / `mustFail` / `isEmpty` and the other case helpers live in parse.eco
+ * (same module).
+ */
+
+function edgeQuote(const string& $inner) : string
+{
+    string $out = '';
+
+    $out->push(34);
+    $out->append($inner);
+    $out->push(34);
+
+    return $out;
+}
+
+function edgeBytes(int32 $a) : string
+{
+    string $s = '';
+    uint8 $b = $a;
+
+    $s->push($b);
+
+    return $s;
+}
+
+function edgeBytes2(int32 $a, int32 $b) : string
+{
+    string $s = edgeBytes($a);
+    uint8 $u = $b;
+
+    $s->push($u);
+
+    return $s;
+}
+
+function edgeBytes3(int32 $a, int32 $b, int32 $c) : string
+{
+    string $s = edgeBytes2($a, $b);
+    uint8 $u = $c;
+
+    $s->push($u);
+
+    return $s;
+}
+
+function edgeBytes4(int32 $a, int32 $b, int32 $c, int32 $d) : string
+{
+    string $s = edgeBytes3($a, $b, $c);
+    uint8 $u = $d;
+
+    $s->push($u);
+
+    return $s;
+}
+
+function edgeRepeat(int32 $b, int32 $n) : string
+{
+    string $s = '';
+    int32 $i = 0;
+    uint8 $u = $b;
+
+    while ($i < $n) {
+        $s->push($u);
+        $i = $i + 1;
+    }
+
+    return $s;
+}
+
+function edgeJoin(const string& $a, const string& $b) : string
+{
+    string $s = $a;
+
+    $s->append($b);
+
+    return $s;
+}
+
+// ---- broken json -------------------------------------------------------------------------------
+
+#[group: "unit"]
+test unterminated_containers {
+    assert(isUnterminated(mustFail('[')), 'bare [');
+    assert(isUnterminated(mustFail('[1')), 'array missing ]');
+    assert(isUnterminated(mustFail('[1,')), 'array trailing comma then EOF');
+    assert(isUnterminated(mustFail('{')), 'bare {');
+    assert(isUnterminated(mustFail('{"a"')), 'object missing colon');
+    assert(isUnterminated(mustFail('{"a":')), 'object missing value');
+    assert(isUnterminated(mustFail('{"a":1')), 'object missing }');
+}
+
+#[group: "unit"]
+test mismatched_brackets {
+    assert(isUnexpected(mustFail('[}')), '[}');
+    assert(isUnexpected(mustFail('{]')), '{]');
+    assert(isUnexpected(mustFail('{"a":1]')), 'object closed with ]');
+    assert(isUnexpected(mustFail('[1}')), 'array closed with }');
+    assert(isTrailing(mustFail('[]}')), 'extra } after array');
+    assert(isTrailing(mustFail('{}]')), 'extra ] after object');
+}
+
+#[group: "unit"]
+test missing_punctuation {
+    assert(isUnexpected(mustFail('[1 2]')), 'array missing comma');
+    assert(isUnexpected(mustFail('{"a":1 "b":2}')), 'object missing comma');
+    assert(isUnexpected(mustFail('{"a" 1}')), 'missing colon');
+    assert(isUnexpected(mustFail('{"a"::1}')), 'double colon');
+    assert(isUnexpected(mustFail('[1:2]')), 'colon in array');
+    assert(isUnexpected(mustFail('{1:2}')), 'number as object key');
+    assert(isUnexpected(mustFail('{a:1}')), 'unquoted key');
+}
+
+#[group: "unit"]
+test extra_commas_and_colons {
+    assert(isUnexpected(mustFail('[,]')), 'empty array slot');
+    assert(isUnexpected(mustFail('[1,,2]')), 'double comma');
+    assert(isUnexpected(mustFail('{,}')), 'object starting with comma');
+    assert(isUnexpected(mustFail('{"a":1,}')), 'trailing comma in object');
+    assert(isUnexpected(mustFail('{"a":}')), 'missing value after colon');
+    assert(isUnexpected(mustFail('[:]')), 'colon as array element');
+}
+
+#[group: "unit"]
+test not_json_at_all {
+    assert(isUnexpected(mustFail("'hi'")), 'single quotes');
+    assert(isUnexpected(mustFail('hello')), 'bare identifier');
+    assert(isUnexpected(mustFail('# no')), 'hash comment');
+    assert(isUnexpected(mustFail('// no')), 'line comment');
+    assert(isUnexpected(mustFail('True')), 'capital True');
+    assert(isUnexpected(mustFail('FALSE')), 'capital FALSE');
+    assert(isUnexpected(mustFail('NULL')), 'capital NULL');
+    assert(isUnexpected(mustFail('NaN')), 'NaN');
+    assert(isUnexpected(mustFail('Infinity')), 'Infinity');
+    assert(isUnexpected(mustFail('+1')), 'leading plus');
+}
+
+#[group: "unit"]
+test broken_literals {
+    assert(isUnterminated(mustFail('n')), 'n');
+    assert(isUnterminated(mustFail('nu')), 'nu');
+    assert(isUnterminated(mustFail('nul')), 'nul');
+    assert(isUnterminated(mustFail('t')), 't');
+    assert(isUnterminated(mustFail('tr')), 'tr');
+    assert(isUnterminated(mustFail('tru')), 'tru');
+    assert(isUnterminated(mustFail('f')), 'f');
+    assert(isUnterminated(mustFail('fal')), 'fal');
+    assert(isUnterminated(mustFail('fals')), 'fals');
+    assert(isUnexpected(mustFail('nuxx')), 'nuxx');
+    assert(isUnexpected(mustFail('trux')), 'trux');
+    assert(isUnexpected(mustFail('fulse')), 'fulse');
+    assert(isTrailing(mustFail('truex')), 'truex');
+    assert(isTrailing(mustFail('nullx')), 'nullx');
+    assert(isTrailing(mustFail('falsex')), 'falsex');
+}
+
+#[group: "unit"]
+test two_top_level_values {
+    assert(isTrailing(mustFail('1 2')), 'two numbers');
+    assert(isTrailing(mustFail('{}[]')), 'object then array');
+    assert(isTrailing(mustFail('"a""b"')), 'two strings');
+    assert(isTrailing(mustFail('true\nfalse')), 'true then false');
+}
+
+// ---- numbers -----------------------------------------------------------------------------------
+
+#[group: "unit"]
+test broken_number_spellings {
+    assert(isBadNumber(mustFail('-')), 'lone minus');
+    assert(isBadNumber(mustFail('--1')), 'double minus');
+    assert(isBadNumber(mustFail('-Infinity')), 'minus Infinity');
+    assert(isUnexpected(mustFail('.5')), 'leading dot');
+    assert(isBadNumber(mustFail('1.')), 'trailing dot');
+    assert(isBadNumber(mustFail('1e')), 'exponent missing digits');
+    assert(isBadNumber(mustFail('1e+')), 'exponent plus missing digits');
+    assert(isBadNumber(mustFail('1e-')), 'exponent minus missing digits');
+    assert(isBadNumber(mustFail('00')), 'double zero');
+    assert(isBadNumber(mustFail('-01')), 'negative leading zero');
+    assert(isBadNumber(mustFail('01.5')), 'leading zero before fraction');
+    assert(isTrailing(mustFail('1.2.3')), 'two dots');
+    assert(isTrailing(mustFail('1e2e3')), 'two exponents');
+    assert(isTrailing(mustFail('0x1')), 'hex prefix');
+    assert(isTrailing(mustFail('1+2')), 'plus in the middle');
+}
+
+#[group: "unit"]
+test integer_limits {
+    assert((mustParse('9223372036854775807')->asInt() ?? 0) == 9223372036854775807, 'int64 max');
+    assert((mustParse('-9223372036854775808')->asInt() ?? 0) == -9223372036854775808, 'int64 min');
+    assert((mustParse('-0')->asInt() ?? 1) == 0, 'negative zero is int 0');
+    assert(isTooBig(mustFail('9223372036854775808')), 'int64 max plus one');
+    assert(isTooBig(mustFail('-9223372036854775809')), 'int64 min minus one');
+    assert(isTooBig(mustFail(edgeRepeat(57, 80))), '80 nines');
+}
+
+#[group: "unit"]
+test float_spellings_and_limits {
+    json::Value $a = mustParse('1e+2');
+
+    assert($a->isFloat(), '1e+2 is float');
+    assert(($a->asFloat() ?? 0.0) == 100.0, '1e+2');
+
+    json::Value $b = mustParse('1E-2');
+
+    assert($b->isFloat(), '1E-2 is float');
+    assert(($b->asFloat() ?? 1.0) == 0.01, '1E-2');
+
+    json::Value $c = mustParse('0e0');
+
+    assert($c->isFloat(), '0e0 is float');
+    assert(($c->asFloat() ?? 1.0) == 0.0, '0e0');
+
+    json::Value $d = mustParse('-0.0');
+
+    assert($d->isFloat(), '-0.0 is float');
+    assert(($d->asFloat() ?? 1.0) == 0.0, '-0.0');
+
+    json::Value $tiny = mustParse('1e-400');
+
+    assert($tiny->isFloat(), 'underflow stays a float');
+    assert(($tiny->asFloat() ?? 1.0) == 0.0, '1e-400 underflows to 0');
+
+    assert(mustParse('1e308')->isFloat(), '1e308 is still in range');
+    assert(isTooBig(mustFail('1e309')), '1e309 overflows float64');
+    assert(isTooBig(mustFail('-1e309')), '-1e309 overflows float64');
+    assert(isTooBig(mustFail('1e400')), '1e400 overflows float64');
+}
+
+// ---- truncated input / no walk past the last byte ----------------------------------------------
+
+#[group: "unit"]
+test truncated_string_and_escape_at_eof {
+    assert(isUnterminated(mustFail('"')), 'opening quote only');
+    assert(isUnterminated(mustFail('"\\')), 'backslash at EOF');
+    assert(isUnterminated(mustFail('"\\u')), '\\u at EOF');
+    assert(isUnterminated(mustFail('"\\u0')), '\\u0 at EOF');
+    assert(isUnterminated(mustFail('"\\u00')), '\\u00 at EOF');
+    assert(isUnterminated(mustFail('"\\u000')), '\\u000 at EOF');
+    assert(isBadEscape(mustFail('"\\uD800')), 'high surrogate then EOF');
+    assert(isUnterminated(mustFail('"\\uD800\\')), 'high surrogate, backslash, EOF');
+    assert(isUnterminated(mustFail('"\\uD800\\u')), 'high surrogate, \\u, EOF');
+    assert(isUnterminated(mustFail('"\\uD800\\uD')), 'high surrogate, partial low, EOF');
+}
+
+#[group: "unit"]
+test truncated_utf8_at_eof {
+    // " + lead, no continuation, no closing quote
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes(194))->sub(0, 2))), 'truncated 2-byte then EOF');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes2(226, 130))->sub(0, 3))), 'truncated 3-byte then EOF');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes3(240, 159, 152))->sub(0, 4))), 'truncated 4-byte then EOF');
+}
+
+// ---- bad utf-8 ---------------------------------------------------------------------------------
+
+#[group: "unit"]
+test isolated_continuation_bytes {
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes(128)))), '0x80');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes(191)))), '0xbf');
+}
+
+#[group: "unit"]
+test truncated_multibyte_inside_string {
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes(194)))), '2-byte lead only');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes2(226, 130)))), '3-byte missing last');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes3(240, 159, 152)))), '4-byte missing last');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes2(194, 32)))), '2-byte with space continuation');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes2(194, 255)))), '2-byte with 0xff continuation');
+}
+
+#[group: "unit"]
+test overlong_utf8 {
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes2(192, 128)))), 'overlong NUL C0 80');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes2(193, 191)))), 'overlong C1 BF');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes3(224, 128, 128)))), 'overlong 3-byte NUL');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes4(240, 128, 128, 128)))), 'overlong 4-byte NUL');
+}
+
+#[group: "unit"]
+test utf8_encoded_surrogates {
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes3(237, 160, 128)))), 'U+D800 as UTF-8');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes3(237, 176, 128)))), 'U+DC00 as UTF-8');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes3(237, 191, 191)))), 'U+DFFF as UTF-8');
+}
+
+#[group: "unit"]
+test utf8_out_of_range {
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes(248)))), '5-byte lead 0xf8');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes(255)))), '0xff');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes4(244, 144, 128, 128)))), 'U+110000');
+    assert(isBadUtf8(mustFail(edgeQuote(edgeBytes4(245, 128, 128, 128)))), 'lead 0xf5');
+    assert(mustFail(edgeQuote(edgeBytes(255)))->message()->starts('invalid UTF-8 at '), 'UTF-8 sentence');
+}
+
+#[group: "unit"]
+test high_byte_outside_a_string {
+    assert(isUnexpected(mustFail(edgeBytes(128))), '0x80 as a token');
+    assert(isUnexpected(mustFail(edgeBytes(255))), '0xff as a token');
+    assert(isUnexpected(mustFail(edgeBytes3(239, 187, 191))), 'UTF-8 BOM at start');
+}
+
+#[group: "unit"]
+test valid_multibyte_utf8 {
+    assert((mustParse(edgeQuote(edgeBytes2(195, 164)))->asStr() ?? '') == 'ä', '2-byte latin');
+
+    string $euro = mustParse(edgeQuote(edgeBytes3(226, 130, 172)))->asStr() ?? '';
+
+    assert($euro->size() == 3, 'euro is 3 bytes');
+    assert($euro->byte(0) == 226, 'euro e2');
+    assert($euro->byte(1) == 130, 'euro 82');
+    assert($euro->byte(2) == 172, 'euro ac');
+
+    string $grin = mustParse(edgeQuote(edgeBytes4(240, 159, 152, 128)))->asStr() ?? '';
+
+    assert($grin->size() == 4, 'grin is 4 bytes');
+    assert($grin->byte(0) == 240, 'grin f0');
+
+    string $max = mustParse(edgeQuote(edgeBytes4(244, 143, 191, 191)))->asStr() ?? '';
+
+    assert($max->size() == 4, 'U+10FFFF is 4 bytes');
+    assert($max->byte(0) == 244, 'U+10FFFF f4');
+}
+
+// ---- unicode escapes ---------------------------------------------------------------------------
+
+#[group: "unit"]
+test bad_unicode_escapes {
+    assert(isBadEscape(mustFail('"\\x00"')), '\\x is not an escape');
+    assert(isBadEscape(mustFail('"\\a"')), '\\a is not an escape');
+    assert(isBadEscape(mustFail('"\\v"')), '\\v is not an escape');
+    assert(isBadEscape(mustFail('"\\u00zz"')), 'non-hex in \\u');
+    assert(isBadEscape(mustFail('"\\u00G0"')), 'G is not hex');
+    assert(isBadEscape(mustFail('"\\U0000"')), 'capital U');
+    assert(isBadEscape(mustFail('"\\uDC00"')), 'lone low surrogate');
+    assert(isBadEscape(mustFail('"\\ud800"')), 'lowercase lone high');
+    assert(isBadEscape(mustFail('"\\uD800\\uD800"')), 'high then high');
+    assert(isBadEscape(mustFail('"\\uD800\\u0041"')), 'high then non-surrogate');
+    assert(isBadEscape(mustFail('"\\uD800X"')), 'high then ASCII');
+}
+
+#[group: "unit"]
+test unicode_escape_edges {
+    string $nul = mustParse('"\\u0000"')->asStr() ?? 'x';
+
+    assert($nul->size() == 1, 'NUL is one byte');
+    assert($nul->byte(0) == 0, 'NUL byte');
+
+    assert((mustParse('"\\u00E4"')->asStr() ?? '') == 'ä', 'uppercase hex');
+
+    string $d7ff = mustParse('"\\uD7FF"')->asStr() ?? '';
+    string $e000 = mustParse('"\\uE000"')->asStr() ?? '';
+    string $ffff = mustParse('"\\uFFFF"')->asStr() ?? '';
+
+    assert($d7ff->size() == 3, 'last BMP before surrogates');
+    assert($e000->size() == 3, 'first BMP after surrogates');
+    assert($ffff->size() == 3, 'U+FFFF is a valid scalar');
+
+    string $max = mustParse('"\\uDBFF\\uDFFF"')->asStr() ?? '';
+
+    assert($max->size() == 4, 'U+10FFFF via surrogates');
+    assert($max->byte(0) == 244, 'F4');
+    assert($max->byte(1) == 143, '8F');
+    assert($max->byte(2) == 191, 'BF');
+    assert($max->byte(3) == 191, 'BF');
+}
+
+#[group: "unit"]
+test remaining_escapes {
+    string $bs = mustParse('"\\b"')->asStr() ?? '';
+    string $ff = mustParse('"\\f"')->asStr() ?? '';
+    string $cr = mustParse('"\\r"')->asStr() ?? '';
+
+    assert($bs->size() == 1 && $bs->byte(0) == 8, 'backspace');
+    assert($ff->size() == 1 && $ff->byte(0) == 12, 'form feed');
+    assert($cr->size() == 1 && $cr->byte(0) == 13, 'carriage return');
+    assert(json::dump(mustParse('"\\b\\f\\r"')) == '"\\b\\f\\r"', 'named controls dump named');
+}
+
+// ---- controls and whitespace -------------------------------------------------------------------
+
+#[group: "unit"]
+test unescaped_controls_in_strings {
+    assert(isUnexpected(mustFail(edgeQuote(edgeBytes(0)))), 'NUL in string');
+    assert(isUnexpected(mustFail(edgeQuote(edgeBytes(1)))), '0x01 in string');
+    assert(isUnexpected(mustFail(edgeQuote(edgeBytes(9)))), 'tab in string');
+    assert(isUnexpected(mustFail(edgeQuote(edgeBytes(10)))), 'LF in string');
+    assert(isUnexpected(mustFail(edgeQuote(edgeBytes(13)))), 'CR in string');
+    assert(isUnexpected(mustFail(edgeQuote(edgeBytes(31)))), '0x1f in string');
+}
+
+#[group: "unit"]
+test del_is_allowed_in_a_string {
+    string $got = mustParse(edgeQuote(edgeBytes(127)))->asStr() ?? '';
+
+    assert($got->size() == 1, 'DEL is one byte');
+    assert($got->byte(0) == 127, 'DEL');
+}
+
+#[group: "unit"]
+test form_feed_is_not_whitespace {
+    assert(isUnexpected(mustFail(edgeBytes(12))), 'bare form feed');
+
+    string $padded = '';
+
+    $padded->push(12);
+    $padded->append('1');
+
+    assert(isUnexpected(mustFail($padded)), 'form feed then number');
+}
+
+#[group: "unit"]
+test cr_is_whitespace {
+    json::Value $v = mustParse("[\r1\r,\r2\r]");
+
+    assert($v->isArray(), 'CR-separated array');
+    assert($v->count() == 2, 'two elements');
+}
+
+#[group: "unit"]
+test dump_generic_control {
+    string $inner = '';
+
+    $inner->push(1);
+
+    assert(json::dump(json::str($inner)) == '"\\u0001"', '0x01 dumps as \\u0001');
+}
+
+// ---- nesting / long input ----------------------------------------------------------------------
+
+#[group: "unit"]
+test nesting_exactly_max {
+    string $deep = edgeJoin(edgeRepeat(91, 128), edgeRepeat(93, 128));
+    json::Value $v = mustParse($deep);
+
+    assert($v->isArray(), '128 arrays is allowed');
+}
+
+#[group: "unit"]
+test nesting_cap_objects {
+    string $deep = '';
+    int32 $i = 0;
+
+    while ($i < 129) {
+        $deep->append('{"x":');
+        $i = $i + 1;
+    }
+
+    $deep->append('1');
+    $i = 0;
+
+    while ($i < 129) {
+        $deep->push(125);
+        $i = $i + 1;
+    }
+
+    json::Error $e = mustFail($deep);
+
+    assert(isTooDeep($e), '129 objects is too deep');
+}
+
+#[group: "unit"]
+test long_string_round_trips {
+    string $inner = edgeRepeat(97, 4096);
+    json::Value $v = mustParse(edgeQuote($inner));
+    string $got = $v->asStr() ?? '';
+
+    assert($got->size() == 4096, '4096-byte string');
+    assert(json::dump($v) == edgeQuote($inner), 'long string dumps back');
+}
+
+#[group: "unit"]
+test long_number_token_is_too_big {
+    string $token = edgeJoin('1', edgeRepeat(48, 200));
+
+    assert(isTooBig(mustFail($token)), '201-digit integer');
+}
+
+#[group: "unit"]
+test empty_string_and_empty_key {
+    assert((mustParse('""')->asStr() ?? 'x') == '', 'empty string');
+
+    json::Value $v = mustParse('{"":1}');
+
+    assert(($v->get('')?->asInt() ?? 0) == 1, 'empty object key');
+    assert(json::dump($v) == '{"":1}', 'empty key dumps');
+}
+
+#[group: "unit"]
+test unicode_object_key {
+    json::Value $v = mustParse('{"ä":1}');
+
+    assert(($v->get('ä')?->asInt() ?? 0) == 1, 'raw utf-8 key');
+
+    json::Value $u = mustParse('{"\\u00e4":2}');
+
+    assert(($u->get('ä')?->asInt() ?? 0) == 2, 'escaped utf-8 key');
+}
+
+#[group: "unit"]
+test error_offset_on_truncated_escape {
+    json::Error $e = mustFail('"\\u00');
+
+    assert(isUnterminated($e), 'kind');
+    assert($e->line() == 1, 'line');
+    assert($e->column() == 6, 'column sits on EOF');
+    assert($e->offset() == 5, 'offset sits on EOF');
+}

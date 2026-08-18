@@ -1,0 +1,324 @@
+/**
+ * RFC 8259 fixtures, errors, nesting, unicode.
+ */
+
+function mustParse(const string& $text) : json::Value
+{
+    result<json::Value, json::Error> $r = json::parse($text);
+
+    return $r->unwrap();
+}
+
+function mustFail(const string& $text) : json::Error
+{
+    result<json::Value, json::Error> $r = json::parse($text);
+
+    return $r->failure();
+}
+
+function isUnexpected(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::unexpected($at) => true,
+        else => false,
+    };
+}
+
+function isUnterminated(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::unterminated($at) => true,
+        else => false,
+    };
+}
+
+function isBadEscape(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::badEscape($at) => true,
+        else => false,
+    };
+}
+
+function isBadUtf8(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::badUtf8($at) => true,
+        else => false,
+    };
+}
+
+function isBadNumber(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::badNumber($at) => true,
+        else => false,
+    };
+}
+
+function isTooBig(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::tooBig($at) => true,
+        else => false,
+    };
+}
+
+function isTooDeep(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::tooDeep($at) => true,
+        else => false,
+    };
+}
+
+function isTrailing(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::trailing($at) => true,
+        else => false,
+    };
+}
+
+function isEmpty(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::empty($at) => true,
+        else => false,
+    };
+}
+
+#[group: "unit"]
+test parses_scalars {
+    assert(mustParse('null')->isNull(), 'null');
+    assert((mustParse('true')->asBool() ?? false) == true, 'true');
+    assert((mustParse('false')->asBool() ?? true) == false, 'false');
+    assert((mustParse('42')->asInt() ?? 0) == 42, 'int');
+    assert((mustParse('-7')->asInt() ?? 0) == -7, 'negative');
+    assert((mustParse('0')->asInt() ?? 1) == 0, 'zero');
+    assert((mustParse('"hi"')->asStr() ?? '') == 'hi', 'string');
+}
+
+#[group: "unit"]
+test parses_surrounding_whitespace {
+    json::Value $v = mustParse("  \n\ttrue\r\n  ");
+
+    assert(($v->asBool() ?? false) == true, 'whitespace around a value');
+}
+
+#[group: "unit"]
+test parses_an_array {
+    json::Value $v = mustParse('[1, "a", false, null]');
+
+    assert($v->isArray(), 'array');
+    assert($v->count() == 4, 'four');
+    int64 $first = $v[0]->asInt() ?? 0;
+    string $second = $v[1]->asStr() ?? '';
+    bool $third = $v[2]->asBool() ?? true;
+
+    assert($first == 1, 'first');
+    assert($second == 'a', 'second');
+    assert($third == false, 'third');
+    assert($v[3]->isNull(), 'fourth is JSON null');
+}
+
+#[group: "unit"]
+test parses_an_object {
+    json::Value $v = mustParse('{"name":"echo","n":1}');
+
+    assert($v->isObject(), 'object');
+    string $name = $v['name']->asStr() ?? '';
+    int64 $n = $v['n']->asInt() ?? 0;
+
+    assert($name == 'echo', 'name');
+    assert($n == 1, 'n');
+}
+
+#[group: "unit"]
+test last_duplicate_key_wins {
+    json::Value $v = mustParse('{"a":1,"a":2}');
+
+    int64 $a = $v['a']->asInt() ?? 0;
+
+    assert($a == 2, 'last write wins');
+    assert(json::dump($v) == '{"a":2}', 'order keeps the first key');
+}
+
+#[group: "unit"]
+test number_with_fraction_is_float {
+    json::Value $v = mustParse('1.5');
+
+    assert($v->isFloat(), 'fraction is float');
+    assert(($v->asFloat() ?? 0.0) == 1.5, '1.5');
+}
+
+#[group: "unit"]
+test number_with_exponent_is_float {
+    json::Value $v = mustParse('1e2');
+
+    assert($v->isFloat(), 'exponent is float');
+    assert(($v->asFloat() ?? 0.0) == 100.0, '1e2');
+}
+
+#[group: "unit"]
+test empty_containers {
+    assert(mustParse('[]')->isArray(), 'empty array');
+    assert(mustParse('{}')->isObject(), 'empty object');
+    assert(mustParse('[]')->count() == 0, 'array count');
+    assert(mustParse('{}')->count() == 0, 'object count');
+}
+
+#[group: "unit"]
+test string_escapes {
+    assert((mustParse('"\\""')->asStr() ?? '') == '"', 'quote');
+    assert((mustParse('"\\\\"')->asStr() ?? '') == '\\', 'backslash');
+    assert((mustParse('"\\/"')->asStr() ?? '') == '/', 'slash');
+    assert((mustParse('"\\n"')->asStr() ?? '') == "\n", 'newline');
+    assert((mustParse('"\\t"')->asStr() ?? '') == "\t", 'tab');
+}
+
+#[group: "unit"]
+test unicode_escape {
+    json::Value $v = mustParse('"\\u00e4"');
+
+    assert(($v->asStr() ?? '') == 'ä', 'latin a umlaut');
+}
+
+#[group: "unit"]
+test surrogate_pair {
+    json::Value $v = mustParse('"\\uD83D\\uDE00"');
+
+    string $got = $v->asStr() ?? '';
+
+    assert($got->size() == 4, 'four utf-8 bytes');
+    assert($got->byte(0) == 240, 'f0');
+    assert($got->byte(1) == 159, '9f');
+    assert($got->byte(2) == 152, '98');
+    assert($got->byte(3) == 128, '80');
+}
+
+#[group: "unit"]
+test raw_utf8_in_a_string {
+    json::Value $v = mustParse('"ä"');
+
+    assert(($v->asStr() ?? '') == 'ä', 'raw utf-8');
+}
+
+#[group: "unit"]
+test empty_input_is_empty {
+    json::Error $e = mustFail('');
+
+    assert(isEmpty($e), 'empty');
+}
+
+#[group: "unit"]
+test whitespace_only_is_empty {
+    json::Error $e = mustFail("  \n\t");
+
+    assert(isEmpty($e), 'whitespace only');
+}
+
+#[group: "unit"]
+test trailing_data {
+    json::Error $e = mustFail('true false');
+
+    assert(isTrailing($e), 'trailing');
+}
+
+#[group: "unit"]
+test unterminated_string {
+    json::Error $e = mustFail('"hi');
+
+    assert(isUnterminated($e), 'unterminated');
+}
+
+#[group: "unit"]
+test unexpected_token {
+    json::Error $e = mustFail(']');
+
+    assert(isUnexpected($e), 'unexpected');
+}
+
+#[group: "unit"]
+test leading_zero_is_bad_number {
+    json::Error $e = mustFail('01');
+
+    assert(isBadNumber($e), 'leading zero');
+}
+
+#[group: "unit"]
+test trailing_comma {
+    json::Error $e = mustFail('[1,]');
+
+    assert(isUnexpected($e), 'trailing comma');
+}
+
+#[group: "unit"]
+test integer_overflow_is_too_big {
+    json::Error $e = mustFail('9223372036854775808');
+
+    assert(isTooBig($e), 'int64 overflow');
+    assert($e->column() == 1, 'overflow names the start of the token');
+}
+
+#[group: "unit"]
+test lone_surrogate {
+    json::Error $e = mustFail('"\\uD800"');
+
+    assert(isBadEscape($e), 'lone high surrogate');
+}
+
+#[group: "unit"]
+test comments_are_refused {
+    json::Error $e = mustFail('{"a":1 /* no */}');
+
+    assert(isUnexpected($e), 'no comments');
+}
+
+#[group: "unit"]
+test error_carries_a_place {
+    json::Error $e = mustFail("[\n  1,\n  #");
+
+    assert($e->line() == 3, 'line');
+    assert($e->column() == 3, 'column');
+}
+
+#[group: "unit"]
+test nesting_cap {
+    string $deep = '';
+    int32 $i = 0;
+
+    while ($i < 129) {
+        $deep->push(91);
+        $i = $i + 1;
+    }
+
+    $i = 0;
+
+    while ($i < 129) {
+        $deep->push(93);
+        $i = $i + 1;
+    }
+
+    json::Error $e = mustFail($deep);
+
+    assert(isTooDeep($e), '129 arrays is too deep');
+}
+
+#[group: "unit"]
+test round_trip_identity {
+    string $src = '{"a":[1,true,null,"x"],"b":1.5}';
+    json::Value $v = mustParse($src);
+    string $out = json::dump($v);
+    json::Value $again = mustParse($out);
+
+    assert(json::dump($again) == $out, 'dump then parse then dump');
+}
+
+#[group: "unit"]
+test interpolation_of_an_error {
+    json::Error $e = mustFail('');
+    string $s = "{$e}";
+
+    assert($s->starts('empty input at '), 'message interpolates');
+}

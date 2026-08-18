@@ -1,0 +1,99 @@
+/**
+ * Constructors, extractors, clone sharing.
+ */
+
+#[group: "unit"]
+test nil_is_null {
+    json::Value $v = json::nil();
+
+    assert($v->isNull(), 'nil is null');
+    assert(!$v->isBool(), 'nil is not a bool');
+    assert($v->asStr() == null, 'nil has no string');
+}
+
+#[group: "unit"]
+test bool_round_trips {
+    json::Value $t = json::bool(true);
+    json::Value $f = json::bool(false);
+
+    assert($t->isBool(), 'true is a bool');
+    assert(($t->asBool() ?? false) == true, 'true comes back');
+    assert(($f->asBool() ?? true) == false, 'false comes back');
+    assert($t->asInt() == null, 'a bool is not an int');
+}
+
+#[group: "unit"]
+test int_and_float {
+    json::Value $n = json::int(42);
+    json::Value $f = json::float(1.5);
+
+    assert($n->isInt(), '42 is an int');
+    assert($n->isNumber(), '42 is a number');
+    assert(($n->asInt() ?? 0) == 42, '42 comes back');
+    assert(($n->asFloat() ?? 0.0) == 42.0, 'an int widens');
+    assert($f->isFloat(), '1.5 is a float');
+    assert($f->asInt() == null, 'a float is not an int');
+    assert(($f->asFloat() ?? 0.0) == 1.5, '1.5 comes back');
+}
+
+#[group: "unit"]
+test str_comes_back {
+    json::Value $s = json::str('hello');
+
+    assert($s->isStr(), 'it is a string');
+    assert(($s->asStr() ?? '') == 'hello', 'the bytes come back');
+}
+
+#[group: "unit"]
+test empty_array_and_object {
+    json::Value $a = json::arr();
+    json::Value $o = json::object();
+
+    assert($a->isArray(), 'empty array');
+    assert($o->isObject(), 'empty object');
+    assert($a->count() == 0, 'array count');
+    assert($o->count() == 0, 'object count');
+}
+
+#[group: "unit"]
+test assignment_shares {
+    json::Value $a = json::object();
+    $a['x'] = json::int(1);
+
+    json::Value $b = $a;
+    $b['x'] = json::int(2);
+
+    int64 $shared = $a['x']->asInt() ?? 0;
+
+    assert($shared == 2, 'assignment shares the node');
+}
+
+#[group: "unit"]
+test clone_is_a_deep_copy {
+    json::Value $a = json::object();
+    $a['x'] = json::int(1);
+
+    json::Value $b = $a->clone();
+    $b['x'] = json::int(2);
+
+    int64 $orig = $a['x']->asInt() ?? 0;
+    int64 $copy = $b['x']->asInt() ?? 0;
+
+    assert($orig == 1, 'the original is untouched');
+    assert($copy == 2, 'the clone was written');
+}
+
+#[group: "unit"]
+test leading_dot_constructors {
+    json::Value $v = .nil();
+
+    assert($v->isNull(), 'dot nil');
+
+    json::Value $n = .int(7);
+
+    assert(($n->asInt() ?? 0) == 7, 'dot int');
+
+    json::Value $a = .array();
+
+    assert($a->isArray(), 'dot array does not hide array<T>');
+}

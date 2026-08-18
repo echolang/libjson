@@ -1,0 +1,87 @@
+/**
+ * Compact and pretty dump, escape round-trips once parse is in the picture.
+ */
+
+#[group: "unit"]
+test dumps_scalars {
+    assert(json::dump(json::nil()) == 'null', 'null');
+    assert(json::dump(json::bool(true)) == 'true', 'true');
+    assert(json::dump(json::bool(false)) == 'false', 'false');
+    assert(json::dump(json::int(42)) == '42', 'int');
+    assert(json::dump(json::int(-7)) == '-7', 'negative');
+    assert(json::dump(json::str('hi')) == '"hi"', 'string');
+}
+
+#[group: "unit"]
+test dumps_empty_containers {
+    assert(json::dump(json::arr()) == '[]', 'empty array');
+    assert(json::dump(json::object()) == '{}', 'empty object');
+}
+
+#[group: "unit"]
+test dumps_a_small_object {
+    json::Value $v = json::object();
+    $v['name'] = 'echo';
+    $v['n'] = 1;
+
+    assert(json::dump($v) == '{"name":"echo","n":1}', 'compact object');
+}
+
+#[group: "unit"]
+test dumps_a_nested_array {
+    json::Value $inner = json::arr();
+    $inner[] = json::int(1);
+    $inner[] = json::int(2);
+
+    json::Value $outer = json::arr();
+    $outer[] = $inner;
+
+    assert(json::dump($outer) == '[[1,2]]', 'nested array');
+}
+
+#[group: "unit"]
+test escapes_quotes_and_controls {
+    json::Value $q = json::str('a"b');
+    assert(json::dump($q) == '"a\\"b"', 'quote');
+
+    json::Value $nl = json::str('a\nb');
+    // the source string is a, backslash, n, b - not a newline. build a real newline:
+    string $raw = '';
+    $raw->push(97);
+    $raw->push(10);
+    $raw->push(98);
+
+    assert(json::dump(json::str($raw)) == '"a\\nb"', 'newline');
+}
+
+#[group: "unit"]
+test pretty_indents {
+    json::Value $v = json::object();
+    $v['a'] = json::int(1);
+
+    string $got = json::pretty($v);
+
+    assert($got == "{\n  \"a\": 1\n}", 'two space indent');
+}
+
+#[group: "unit"]
+test pretty_empty_stays_tight {
+    assert(json::pretty(json::arr()) == '[]', 'pretty empty array');
+    assert(json::pretty(json::object()) == '{}', 'pretty empty object');
+}
+
+#[group: "unit"]
+test interpolation_dumps {
+    json::Value $v = json::int(3);
+    string $s = "{$v}";
+
+    assert($s == '3', 'str::from is dump');
+}
+
+#[group: "unit"]
+test float_dumps_as_a_float_token {
+    assert(json::dump(json::float(1.0)) == '1.0', 'constructed 1.0 keeps a dot');
+    assert(json::dump(mustParse('1.0')) == '1.0', 'parsed 1.0 keeps a dot');
+    assert(mustParse(json::dump(mustParse('1e2')))->isFloat(), '1e2 survives dump then parse');
+    assert(mustParse(json::dump(json::float(1.0)))->isFloat(), 'constructed 1.0 survives dump then parse');
+}

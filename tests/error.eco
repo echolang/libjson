@@ -1,0 +1,37 @@
+/**
+ * Error as an enum: a named case, the place, interpolation.
+ */
+
+function isTooBigCase(const json::Error& $e) : bool
+{
+    return match ($e) {
+        json::Error::tooBig($at) => true,
+        else => false,
+    };
+}
+
+#[group: "unit"]
+test a_constructed_error_is_the_named_case {
+    json::Place $at = json::Place(1, 1, 0);
+    json::Error $e = json::Error::tooBig($at);
+
+    assert(isTooBigCase($e), 'tooBig is the case');
+    assert($e->message() == 'number too large at 1:1', 'the sentence comes from the case');
+    assert($e->line() == 1, 'line');
+    assert($e->column() == 1, 'column');
+    assert($e->offset() == 0, 'offset');
+}
+
+#[group: "unit"]
+test interpolating_an_error_is_the_sentence {
+    json::Error $e = json::Error::empty(json::Place(1, 1, 0));
+
+    assert("{$e}" == 'empty input at 1:1', 'str::from reads the message');
+}
+
+#[group: "unit"]
+test bad_utf8_is_not_an_escape {
+    json::Error $e = json::Error::badUtf8(json::Place(1, 2, 1));
+
+    assert($e->message() == 'invalid UTF-8 at 1:2', 'UTF-8 has its own sentence');
+}

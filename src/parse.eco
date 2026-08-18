@@ -1,0 +1,649 @@
+/**
+ * `json::parse` - one value from RFC 8259 text.
+ *
+ * Recursive descent over `$text->byte($i)`. First-byte dispatch, escapes, hex and
+ * whitespace are ordinary byte tests. Number tokens are classified by their spelling, then
+ * handed to `str::int` / `str::float`. No `extern`, no `sscanf`.
+ *
+ * The nesting cap is 128. Deeper is `.tooDeep`, not a stack overflow.
+ */
+
+namespace json;
+
+internal const int32 MAX_DEPTH = 128;
+
+public function parse(const string& $text) : result<Value, Error>
+{
+    Parser $p = Parser($text);
+
+    return $p->run();
+}
+
+struct Parser
+{
+    string $src;
+    usize $i;
+    int64 $line;
+    int64 $column;
+    int32 $depth;
+
+    constructor(const string& $src)
+    {
+        $this->src = $src;
+        $this->i = 0;
+        $this->line = 1;
+        $this->column = 1;
+        $this->depth = 0;
+    }
+
+    function run() : result<Value, Error>
+    {
+        $this->skipWs();
+
+        if ($this->atEnd()) {
+            return .error(Error::empty($this->here()));
+        }
+
+        Value $v = guard $this->parseValue() else ($e) {
+            return .error($e);
+        }
+
+        $this->skipWs();
+
+        if (!$this->atEnd()) {
+            return .error(Error::trailing($this->here()));
+        }
+
+        return .ok($v);
+    }
+
+    function parseValue() : result<Value, Error>
+    {
+        $this->skipWs();
+
+        if ($this->atEnd()) {
+            return .error(Error::unterminated($this->here()));
+        }
+
+        uint8 $b = $this->peek();
+
+        if ($b == CH_LOWER_N) {
+            return $this->parseLiteral('null', Value::nil());
+        }
+
+        if ($b == CH_LOWER_T) {
+            return $this->parseLiteral('true', Value::bool(true));
+        }
+
+        if ($b == CH_LOWER_F) {
+            return $this->parseLiteral('false', Value::bool(false));
+        }
+
+        if ($b == CH_QUOTE) {
+            return $this->parseString();
+        }
+
+        if ($b == CH_LSQUARE) {
+            return $this->parseArray();
+        }
+
+        if ($b == CH_LCURLY) {
+            return $this->parseObject();
+        }
+
+        if ($b == CH_MINUS || $this->isDigit($b)) {
+            return $this->parseNumber();
+        }
+
+        return .error(Error::unexpected($this->here()));
+    }
+
+    function parseLiteral(const string& $word, Value $value) : result<Value, Error>
+    {
+        usize $n = $word->size();
+        usize $k = 0;
+
+        while ($k < $n) {
+            if ($this->atEnd()) {
+                return .error(Error::unterminated($this->here()));
+            }
+
+            if ($this->peek() != $word->byte($k)) {
+                return .error(Error::unexpected($this->here()));
+            }
+
+            $this->advance();
+            $k = $k + 1;
+        }
+
+        return .ok($value);
+    }
+
+    function parseString() : result<Value, Error>
+    {
+        string $s = guard $this->readString() else ($e) {
+            return .error($e);
+        }
+
+        return .ok(Value::str($s));
+    }
+
+    function readString() : result<string, Error>
+    {
+        $this->advance();
+
+        string $out = '';
+
+        while (true) {
+            if ($this->atEnd()) {
+                return .error(Error::unterminated($this->here()));
+            }
+
+            uint8 $b = $this->peek();
+
+            if ($b == CH_QUOTE) {
+                $this->advance();
+
+                return .ok($out);
+            }
+
+            if ($b == CH_BACKSLASH) {
+                uint32 $cp = guard $this->parseEscape() else ($e) {
+                    return .error($e);
+                }
+
+                pushCp($out, $cp);
+
+                continue;
+            }
+
+            if ($b < 32) {
+                return .error(Error::unexpected($this->here()));
+            }
+
+            if ($b >= 128) {
+                Utf8Step $step = decodeAt($this->src, $this->i);
+
+                if (!$step->ok) {
+                    return .error(Error::badUtf8($this->here()));
+                }
+
+                usize $n = $step->len;
+                usize $k = 0;
+
+                while ($k < $n) {
+                    $out->push($this->src->byte($this->i));
+                    $this->advance();
+                    $k = $k + 1;
+                }
+
+                continue;
+            }
+
+            $out->push($b);
+            $this->advance();
+        }
+    }
+
+    /**
+     * One `\...` escape. Answers the scalar to emit. Surrogate pairs are combined here.
+     */
+    function parseEscape() : result<uint32, Error>
+    {
+        $this->advance();
+
+        if ($this->atEnd()) {
+            return .error(Error::unterminated($this->here()));
+        }
+
+        uint8 $b = $this->peek();
+        $this->advance();
+
+        if ($b == CH_LOWER_U) {
+            uint32 $cp = guard $this->parseHex4() else ($e) {
+                return .error($e);
+            }
+
+            if ($cp >= CP_SURR_HIGH_MIN && $cp <= CP_SURR_HIGH_MAX) {
+                return $this->parseLowSurrogate($cp);
+            }
+
+            if ($cp >= CP_SURR_LOW_MIN && $cp <= CP_SURR_LOW_MAX) {
+                return .error(Error::badEscape($this->here()));
+            }
+
+            return .ok($cp);
+        }
+
+        uint8 $out = 0;
+
+        if ($b == CH_QUOTE) {
+            $out = CH_QUOTE;
+        }
+        else if ($b == CH_SLASH) {
+            $out = CH_SLASH;
+        }
+        else if ($b == CH_BACKSLASH) {
+            $out = CH_BACKSLASH;
+        }
+        else if ($b == CH_LOWER_B) {
+            $out = CH_BS;
+        }
+        else if ($b == CH_LOWER_F) {
+            $out = CH_FF;
+        }
+        else if ($b == CH_LOWER_N) {
+            $out = CH_LF;
+        }
+        else if ($b == CH_LOWER_R) {
+            $out = CH_CR;
+        }
+        else if ($b == CH_LOWER_T) {
+            $out = CH_TAB;
+        }
+        else {
+            return .error(Error::badEscape($this->here()));
+        }
+
+        uint32 $cp = $out;
+
+        return .ok($cp);
+    }
+
+    function parseLowSurrogate(uint32 $high) : result<uint32, Error>
+    {
+        if ($this->atEnd() || $this->peek() != CH_BACKSLASH) {
+            return .error(Error::badEscape($this->here()));
+        }
+
+        $this->advance();
+
+        if ($this->atEnd()) {
+            return .error(Error::unterminated($this->here()));
+        }
+
+        if ($this->peek() != CH_LOWER_U) {
+            return .error(Error::badEscape($this->here()));
+        }
+
+        $this->advance();
+
+        uint32 $low = guard $this->parseHex4() else ($e) {
+            return .error($e);
+        }
+
+        if ($low < CP_SURR_LOW_MIN || $low > CP_SURR_LOW_MAX) {
+            return .error(Error::badEscape($this->here()));
+        }
+
+        uint32 $cp = CP_BMP + (($high - CP_SURR_HIGH_MIN) << 10) + ($low - CP_SURR_LOW_MIN);
+
+        return .ok($cp);
+    }
+
+    function parseHex4() : result<uint32, Error>
+    {
+        uint32 $cp = 0;
+        int32 $n = 0;
+
+        while ($n < 4) {
+            if ($this->atEnd()) {
+                return .error(Error::unterminated($this->here()));
+            }
+
+            int32 $d = hexNibble($this->peek());
+
+            if ($d < 0) {
+                return .error(Error::badEscape($this->here()));
+            }
+
+            $cp = ($cp << 4) | $d;
+            $this->advance();
+            $n = $n + 1;
+        }
+
+        return .ok($cp);
+    }
+
+    function parseNumber() : result<Value, Error>
+    {
+        Place $origin = $this->here();
+        usize $start = $this->i;
+
+        if ($this->peek() == CH_MINUS) {
+            $this->advance();
+        }
+
+        if ($this->atEnd()) {
+            return .error(Error::badNumber($this->here()));
+        }
+
+        uint8 $first = $this->peek();
+
+        if ($first == CH_ZERO) {
+            $this->advance();
+
+            if (!$this->atEnd() && $this->isDigit($this->peek())) {
+                return .error(Error::badNumber($this->here()));
+            }
+        }
+        else if (!$this->isDigit($first)) {
+            return .error(Error::badNumber($this->here()));
+        }
+        else {
+            $this->consumeDigits();
+        }
+
+        bool $isFloat = false;
+
+        if (!$this->atEnd() && $this->peek() == CH_DOT) {
+            $isFloat = true;
+            $this->advance();
+
+            if (!$this->consumeDigits()) {
+                return .error(Error::badNumber($this->here()));
+            }
+        }
+
+        if (!$this->atEnd()) {
+            uint8 $exp = $this->peek();
+
+            if ($exp == CH_LOWER_E || $exp == CH_UPPER_E) {
+                $isFloat = true;
+
+                if (!$this->consumeExp()) {
+                    return .error(Error::badNumber($this->here()));
+                }
+            }
+        }
+
+        string $token = $this->src->sub($start, $this->i - $start);
+
+        if ($isFloat) {
+            float64 $n = guard str::float($token) else {
+                return .error(Error::badNumber($origin));
+            }
+
+            if (floatIsNan($n)) {
+                return .error(Error::badNumber($origin));
+            }
+
+            if (floatIsInf($n)) {
+                return .error(Error::tooBig($origin));
+            }
+
+            return .ok(Value::float($n));
+        }
+
+        int64 $n = guard str::int($token) else {
+            return .error(Error::tooBig($origin));
+        }
+
+        return .ok(Value::int($n));
+    }
+
+    /**
+     * Eats `e`/`E`, an optional sign, and at least one digit. False means the spelling was not a
+     * number; the cursor sits on the offending byte so `here` names the right place.
+     */
+    function consumeExp() : bool
+    {
+        $this->advance();
+
+        if ($this->atEnd()) {
+            return false;
+        }
+
+        uint8 $sign = $this->peek();
+
+        if ($sign == CH_PLUS || $sign == CH_MINUS) {
+            $this->advance();
+        }
+
+        return $this->consumeDigits();
+    }
+
+    function consumeDigits() : bool
+    {
+        if ($this->atEnd() || !$this->isDigit($this->peek())) {
+            return false;
+        }
+
+        while (!$this->atEnd() && $this->isDigit($this->peek())) {
+            $this->advance();
+        }
+
+        return true;
+    }
+
+    function parseArray() : result<Value, Error>
+    {
+        bool $empty = guard $this->openContainer(CH_RSQUARE) else ($e) {
+            return .error($e);
+        }
+
+        if ($empty) {
+            return .ok(Value::arr());
+        }
+
+        Value $out = Value::arr();
+
+        while (true) {
+            Value $el = guard $this->parseValue() else ($e) {
+                return .error($e);
+            }
+
+            $out->push($el);
+
+            bool $done = guard $this->closeOrContinue(CH_RSQUARE) else ($e) {
+                return .error($e);
+            }
+
+            if ($done) {
+                return .ok($out);
+            }
+        }
+    }
+
+    function parseObject() : result<Value, Error>
+    {
+        bool $empty = guard $this->openContainer(CH_RCURLY) else ($e) {
+            return .error($e);
+        }
+
+        if ($empty) {
+            return .ok(Value::object());
+        }
+
+        Value $out = Value::object();
+
+        while (true) {
+            string $key = guard $this->parseObjectKey() else ($e) {
+                return .error($e);
+            }
+
+            Value $val = guard $this->parseValue() else ($e) {
+                return .error($e);
+            }
+
+            $out->set($key, $val);
+
+            bool $done = guard $this->closeOrContinue(CH_RCURLY) else ($e) {
+                return .error($e);
+            }
+
+            if ($done) {
+                return .ok($out);
+            }
+        }
+    }
+
+    /**
+     * Depth check, eat the opener, skip whitespace. True if the closer was next (empty
+     * container, already consumed).
+     */
+    function openContainer(uint8 $close) : result<bool, Error>
+    {
+        if ($this->depth >= MAX_DEPTH) {
+            return .error(Error::tooDeep($this->here()));
+        }
+
+        $this->depth = $this->depth + 1;
+        $this->advance();
+        $this->skipWs();
+
+        if (!$this->atEnd() && $this->peek() == $close) {
+            $this->advance();
+            $this->depth = $this->depth - 1;
+
+            return .ok(true);
+        }
+
+        return .ok(false);
+    }
+
+    /**
+     * After an element: comma means continue (false), closer means done (true).
+     */
+    function closeOrContinue(uint8 $close) : result<bool, Error>
+    {
+        $this->skipWs();
+
+        if ($this->atEnd()) {
+            return .error(Error::unterminated($this->here()));
+        }
+
+        uint8 $b = $this->peek();
+
+        if ($b == CH_COMMA) {
+            $this->advance();
+
+            return .ok(false);
+        }
+
+        if ($b == $close) {
+            $this->advance();
+            $this->depth = $this->depth - 1;
+
+            return .ok(true);
+        }
+
+        return .error(Error::unexpected($this->here()));
+    }
+
+    function parseObjectKey() : result<string, Error>
+    {
+        $this->skipWs();
+
+        if ($this->atEnd()) {
+            return .error(Error::unterminated($this->here()));
+        }
+
+        if ($this->peek() != CH_QUOTE) {
+            return .error(Error::unexpected($this->here()));
+        }
+
+        string $key = guard $this->readString() else ($e) {
+            return .error($e);
+        }
+
+        $this->skipWs();
+
+        if ($this->atEnd()) {
+            return .error(Error::unterminated($this->here()));
+        }
+
+        if ($this->peek() != CH_COLON) {
+            return .error(Error::unexpected($this->here()));
+        }
+
+        $this->advance();
+
+        return .ok($key);
+    }
+
+    const function atEnd() : bool
+    {
+        return $this->i >= $this->src->size();
+    }
+
+    const function peek() : uint8
+    {
+        return $this->src->byte($this->i);
+    }
+
+    const function isDigit(uint8 $b) : bool
+    {
+        int32 $wide = $b;
+        int32 $d = $wide - CH_ZERO;
+
+        return $d >= 0 && $d <= 9;
+    }
+
+    function advance() : void
+    {
+        if ($this->atEnd()) {
+            return;
+        }
+
+        uint8 $b = $this->src->byte($this->i);
+
+        $this->i = $this->i + 1;
+
+        if ($b == CH_LF) {
+            $this->line = $this->line + 1;
+            $this->column = 1;
+        }
+        else {
+            $this->column = $this->column + 1;
+        }
+    }
+
+    function skipWs() : void
+    {
+        while (!$this->atEnd()) {
+            uint8 $b = $this->peek();
+
+            if ($b != CH_SPACE && $b != CH_TAB && $b != CH_LF && $b != CH_CR) {
+                return;
+            }
+
+            $this->advance();
+        }
+    }
+
+    function here() : Place
+    {
+        int64 $off = $this->i;
+
+        return Place($this->line, $this->column, $off);
+    }
+}
+
+/**
+ * Value of an ASCII hex digit, or `-1`. Widens before subtracting: a `uint8` difference
+ * wraps, and Echo has no cast operator.
+ */
+function hexNibble(uint8 $b) : int32
+{
+    int32 $wide = $b;
+    int32 $d = $wide - CH_ZERO;
+
+    if ($d >= 0 && $d <= 9) {
+        return $d;
+    }
+
+    $d = $wide - CH_UPPER_A;
+
+    if ($d >= 0 && $d <= 5) {
+        return $d + 10;
+    }
+
+    $d = $wide - CH_LOWER_A;
+
+    if ($d >= 0 && $d <= 5) {
+        return $d + 10;
+    }
+
+    return -1;
+}

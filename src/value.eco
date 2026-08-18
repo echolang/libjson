@@ -1,0 +1,628 @@
+/**
+ * One JSON value.
+ *
+ * An enum, so a number is not as wide as an object. Arrays and objects share through a small class
+ * box: `$b = $a; $b['x'] = 1;` mutates `$a` too. That is the PHP / JS bargain, and it is the one
+ * that makes `$obj['name'] = ...` a real write rather than a copy you throw away. `clone()` is the
+ * deep copy, written out so sharing is never implied by `=`.
+ *
+ * `Items` and `Fields` own the container operations. `Value` is a match that forwards.
+ *
+ * JSON `null` is `json::nil()`. `null` is reserved in Echo, so the function cannot take that name;
+ * `isNull()` still asks the question, because that identifier is a different word. An empty array
+ * is `json::arr()`, not `json::array()`: `array` is already the container type.
+ */
+
+namespace json;
+
+class Items
+{
+    private array<Value> $vals;
+
+    internal constructor()
+    {
+        $this->vals = array<Value>();
+    }
+
+    internal const function count() : usize
+    {
+        return $this->vals->count();
+    }
+
+    internal const function value(usize $i) : Value
+    {
+        return $this->vals[$i];
+    }
+
+    internal const function at(usize $i) : Value?
+    {
+        if ($i >= $this->vals->count()) {
+            return null;
+        }
+
+        return $this->vals[$i];
+    }
+
+    internal function slot(usize $i) : Value&
+    {
+        if ($i >= $this->vals->count()) {
+            return &Value::$absent;
+        }
+
+        return &$this->vals[$i];
+    }
+
+    internal function set(usize $i, Value $value) : void
+    {
+        if ($i >= $this->vals->count()) {
+            die('json::Value: index write past the end of the array');
+        }
+
+        $this->vals[$i] = $value;
+    }
+
+    internal function push(Value $value) : void
+    {
+        $this->vals[] = $value;
+    }
+
+    internal const function copy() : array<Value>
+    {
+        array<Value> $vals = $this->vals;
+
+        return $vals;
+    }
+
+    internal const function clone() : Items
+    {
+        Items $out = Items();
+        usize $n = $this->vals->count();
+        usize $i = 0;
+
+        while ($i < $n) {
+            $out->push($this->vals[$i]->clone());
+            $i = $i + 1;
+        }
+
+        return $out;
+    }
+}
+
+class Fields
+{
+    private ordered_map<string, Value> $vals;
+
+    internal constructor()
+    {
+        $this->vals = ordered_map<string, Value>();
+    }
+
+    internal const function count() : usize
+    {
+        return $this->vals->count();
+    }
+
+    internal const function keys() : array<string>
+    {
+        return $this->vals->keys();
+    }
+
+    internal const function get(const string& $key) : Value?
+    {
+        if (!$this->vals->has($key)) {
+            return null;
+        }
+
+        return $this->vals->get($key);
+    }
+
+    internal const function value(const string& $key) : Value
+    {
+        return $this->vals->get($key);
+    }
+
+    internal function slot(const string& $key) : Value&
+    {
+        if (!$this->vals->has($key)) {
+            return &Value::$absent;
+        }
+
+        return $this->vals->at($key);
+    }
+
+    internal function set(const string& $key, Value $value) : void
+    {
+        $this->vals->set($key, $value);
+    }
+
+    internal const function copy() : ordered_map<string, Value>
+    {
+        ordered_map<string, Value> $vals = $this->vals;
+
+        return $vals;
+    }
+
+    internal const function clone() : Fields
+    {
+        Fields $out = Fields();
+        array<string> $keys = $this->vals->keys();
+        usize $n = $keys->count();
+        usize $i = 0;
+
+        while ($i < $n) {
+            string $key = $keys[$i];
+
+            $out->set($key, $this->vals->get($key)->clone());
+            $i = $i + 1;
+        }
+
+        return $out;
+    }
+}
+
+/**
+ * Case names stay distinct from the constructor methods (`nil`, `bool`, `int`, `str`,
+ * `arr` / `array`, `object`) so an enum case and a static of the same arity can both
+ * exist. Matching `list` / `obj` binds the share-box. Those types are module-internal,
+ * and their methods are `internal`, so a second module that matches a case cannot
+ * mutate the box.
+ */
+public enum Value
+{
+    case none;
+    case boolean(bool $v);
+    case integer(int64 $n);
+    case floating(float64 $n);
+    case text(string $s);
+    case list(Items $items);
+    case obj(Fields $fields);
+
+    /**
+     * The place a missing-key / missing-index read hands back. One JSON `null` the type owns,
+     * because `[]` has to return a `Value&` and `&Value::$absent` is that place.
+     *
+     * `$v['nope']->asStr()` is the supported read. `$v['nope'] = 1` goes through `[]=` and
+     * inserts. Handing the place to a `Value&` parameter writes this static — Echo has no
+     * other slot to hand back. Do not do that.
+     */
+    internal static Value $absent = Value::none;
+
+    // ---- constructors ---------------------------------------------------------------------------
+
+    /** JSON `null`. Named `nil` because `null` is reserved. */
+    static function nil() : Value
+    {
+        return Value::none;
+    }
+
+    static function bool(bool $v) : Value
+    {
+        return Value::boolean($v);
+    }
+
+    static function int(int64 $n) : Value
+    {
+        return Value::integer($n);
+    }
+
+    static function float(float64 $n) : Value
+    {
+        return Value::floating($n);
+    }
+
+    static function str(const string& $s) : Value
+    {
+        return Value::text($s);
+    }
+
+    /**
+     * An empty JSON array. Named `arr` because `array` is already the container type, and a
+     * function of that name in this namespace would steal every `array<T>` spelling.
+     */
+    static function arr() : Value
+    {
+        return Value::list(Items());
+    }
+
+    /**
+     * Same as `arr`. The leading-dot spelling `.array()` is safe: the name lives on `Value`, so it
+     * does not hide the root `array<T>` type the way a free `json::array()` would.
+     */
+    static function array() : Value
+    {
+        return Value::arr();
+    }
+
+    static function object() : Value
+    {
+        return Value::obj(Fields());
+    }
+
+    // ---- inbound conversions --------------------------------------------------------------------
+
+    /**
+     * A bare `1`, `'mario'`, `true` or `1.5` on the right of `[]=` becomes a `Value` here, so the
+     * operators stay one overload each.
+     */
+    #[implicit]
+    static function from(int32 $n) : Value
+    {
+        return Value::int($n);
+    }
+
+    #[implicit]
+    static function from(int64 $n) : Value
+    {
+        return Value::int($n);
+    }
+
+    #[implicit]
+    static function from(float64 $n) : Value
+    {
+        return Value::float($n);
+    }
+
+    #[implicit]
+    static function from(bool $v) : Value
+    {
+        return Value::bool($v);
+    }
+
+    #[implicit]
+    static function from(string $s) : Value
+    {
+        return Value::str($s);
+    }
+
+    // ---- predicates -----------------------------------------------------------------------------
+
+    const function isNull() : bool
+    {
+        return match ($this) {
+            Value::none => true,
+            else => false,
+        };
+    }
+
+    const function isBool() : bool
+    {
+        return match ($this) {
+            Value::boolean($v) => true,
+            else => false,
+        };
+    }
+
+    const function isInt() : bool
+    {
+        return match ($this) {
+            Value::integer($n) => true,
+            else => false,
+        };
+    }
+
+    const function isFloat() : bool
+    {
+        return match ($this) {
+            Value::floating($n) => true,
+            else => false,
+        };
+    }
+
+    const function isNumber() : bool
+    {
+        return match ($this) {
+            Value::integer($n) => true,
+            Value::floating($n) => true,
+            else => false,
+        };
+    }
+
+    const function isStr() : bool
+    {
+        return match ($this) {
+            Value::text($s) => true,
+            else => false,
+        };
+    }
+
+    const function isArray() : bool
+    {
+        return match ($this) {
+            Value::list($items) => true,
+            else => false,
+        };
+    }
+
+    const function isObject() : bool
+    {
+        return match ($this) {
+            Value::obj($fields) => true,
+            else => false,
+        };
+    }
+
+    // ---- extractors -----------------------------------------------------------------------------
+
+    const function asBool() : bool?
+    {
+        match ($this) {
+            Value::boolean($v) => {
+                return $v;
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    /** The integer, when this is an `int`. A `1.0` stays a float. */
+    const function asInt() : int64?
+    {
+        match ($this) {
+            Value::integer($n) => {
+                return $n;
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    /** A float, or an int widened. */
+    const function asFloat() : float64?
+    {
+        match ($this) {
+            Value::floating($f) => {
+                return $f;
+            },
+            Value::integer($i) => {
+                return widenInt($i);
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    const function asStr() : string?
+    {
+        match ($this) {
+            Value::text($s) => {
+                return $s;
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    /**
+     * A copy of the array. Children that are arrays or objects still share their box.
+     */
+    const function asArray() : array<Value>?
+    {
+        match ($this) {
+            Value::list($items) => {
+                return $items->copy();
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    /**
+     * A copy of the object's map. Children that are arrays or objects still share their box.
+     */
+    const function asObject() : ordered_map<string, Value>?
+    {
+        match ($this) {
+            Value::obj($fields) => {
+                return $fields->copy();
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    // ---- lookup ---------------------------------------------------------------------------------
+
+    /**
+     * The value under `$key`, or Echo `null` when this is not an object or the key is missing.
+     *
+     * Echo `null` is not JSON `null`. `$v->get('x')->isNull()` after a present `"x": null` is true;
+     * a missing key never reaches `isNull` because there is no value to ask.
+     */
+    const function get(const string& $key) : Value?
+    {
+        match ($this) {
+            Value::obj($fields) => {
+                return $fields->get($key);
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    /**
+     * The element at `$i`, or Echo `null` when this is not an array or the index is past the end.
+     */
+    const function at(usize $i) : Value?
+    {
+        match ($this) {
+            Value::list($items) => {
+                return $items->at($i);
+            },
+            else => {
+                return null;
+            },
+        }
+    }
+
+    /**
+     * The place `$v[$key]` names. A missing key, or a non-object, is `Value::$absent`.
+     */
+    internal function slot(const string& $key) : Value&
+    {
+        match ($this) {
+            Value::obj($fields) => {
+                return $fields->slot($key);
+            },
+            else => {
+                return &Value::$absent;
+            },
+        }
+    }
+
+    /**
+     * The place `$v[$i]` names. A bad index, or a non-array, is `Value::$absent`.
+     */
+    internal function slotAt(usize $i) : Value&
+    {
+        match ($this) {
+            Value::list($items) => {
+                return $items->slot($i);
+            },
+            else => {
+                return &Value::$absent;
+            },
+        }
+    }
+
+    /**
+     * Walks `$path` as successive object keys. Stops at the first miss or non-object.
+     */
+    const function pick(const array<string>& $path) : Value?
+    {
+        Value $cur = $this;
+
+        foreach ($path as $key) {
+            Value $step = guard $cur->get($key) else {
+                return null;
+            }
+
+            $cur = $step;
+        }
+
+        return $cur;
+    }
+
+    // ---- mutation -------------------------------------------------------------------------------
+
+    /**
+     * Stores `$value` under `$key`. This must be an object; anything else is a bug in the caller.
+     */
+    internal function set(const string& $key, Value $value) : void
+    {
+        match ($this) {
+            Value::obj($fields) => {
+                $fields->set($key, $value);
+            },
+            else => {
+                die('json::Value: []= on a non-object');
+            },
+        }
+    }
+
+    /**
+     * Replaces the element at `$i`. This must be an array and `$i` must be in range.
+     */
+    internal function setAt(usize $i, Value $value) : void
+    {
+        match ($this) {
+            Value::list($items) => {
+                $items->set($i, $value);
+            },
+            else => {
+                die('json::Value: index write on a non-array');
+            },
+        }
+    }
+
+    /**
+     * Appends `$value`. This must be an array; anything else is a bug in the caller.
+     */
+    internal function push(Value $value) : void
+    {
+        match ($this) {
+            Value::list($items) => {
+                $items->push($value);
+            },
+            else => {
+                die('json::Value: append on a non-array');
+            },
+        }
+    }
+
+    /**
+     * How many entries this array or object holds. Zero for every other kind.
+     */
+    const function count() : usize
+    {
+        return match ($this) {
+            Value::list($items) => $items->count(),
+            Value::obj($fields) => $fields->count(),
+            else => 0,
+        };
+    }
+
+    /**
+     * A deep copy: a new node, and a new node for every child. Written out so `$b = $a` is never
+     * mistaken for one.
+     *
+     * A cycle (only possible if you tie a node to an ancestor through `[]=`) overflows the stack,
+     * the same way `dump` would.
+     */
+    const function clone() : Value
+    {
+        return match ($this) {
+            Value::list($items) => Value::list($items->clone()),
+            Value::obj($fields) => Value::obj($fields->clone()),
+            else => $this,
+        };
+    }
+}
+
+function widenInt(int64 $n) : float64
+{
+    float64 $wide = $n;
+
+    return $wide;
+}
+
+public function nil() : Value
+{
+    return Value::nil();
+}
+
+public function bool(bool $v) : Value
+{
+    return Value::bool($v);
+}
+
+public function int(int64 $n) : Value
+{
+    return Value::int($n);
+}
+
+public function float(float64 $n) : Value
+{
+    return Value::float($n);
+}
+
+public function str(const string& $s) : Value
+{
+    return Value::str($s);
+}
+
+public function arr() : Value
+{
+    return Value::arr();
+}
+
+public function object() : Value
+{
+    return Value::object();
+}

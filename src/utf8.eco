@@ -1,0 +1,164 @@
+/**
+ * UTF-8 encode and decode for the string walker in parse.
+ *
+ * A copy of the walk in `stdlib/core/utf8.eco`, not a call: those helpers are `internal` to std.
+ * Invalid sequences are an error here (JSON), not a raw byte (stdlib). Lead-byte width is a
+ * range check, same as `str::utf8_width`, except continuation bytes are width 0 here.
+ */
+
+namespace json;
+
+internal const uint32 CP_SURR_HIGH_MIN = 55296;
+internal const uint32 CP_SURR_HIGH_MAX = 56319;
+internal const uint32 CP_SURR_LOW_MIN = 56320;
+internal const uint32 CP_SURR_LOW_MAX = 57343;
+internal const uint32 CP_BMP = 65536;
+internal const uint32 CP_MAX = 1114111;
+
+struct Utf8Step
+{
+    uint32 $cp;
+    usize $len;
+    bool $ok;
+}
+
+function decodeAt(const string& $text, usize $from) : Utf8Step
+{
+    usize $n = $text->size();
+
+    if ($from >= $n) {
+        return Utf8Step(0, 0, false);
+    }
+
+    uint8 $lead = $text->byte($from);
+    usize $width = utf8LeadWidth($lead);
+
+    if ($width == 0) {
+        return Utf8Step(0, 1, false);
+    }
+
+    if ($width == 1) {
+        return Utf8Step($lead, 1, true);
+    }
+
+    if ($from + $width > $n) {
+        return Utf8Step(0, 1, false);
+    }
+
+    uint32 $cp = $lead;
+    uint32 $min = 0;
+
+    if ($width == 2) {
+        $cp = $lead & 31;
+        $min = 128;
+    }
+    else if ($width == 3) {
+        $cp = $lead & 15;
+        $min = 2048;
+    }
+    else {
+        $cp = $lead & 7;
+        $min = CP_BMP;
+    }
+
+    usize $k = 1;
+
+    while ($k < $width) {
+        uint8 $cont = $text->byte($from + $k);
+
+        if (($cont & 192) != 128) {
+            return Utf8Step(0, 1, false);
+        }
+
+        $cp = ($cp << 6) | ($cont & 63);
+        $k = $k + 1;
+    }
+
+    if ($cp < $min || $cp > CP_MAX) {
+        return Utf8Step(0, 1, false);
+    }
+
+    if ($cp >= CP_SURR_HIGH_MIN && $cp <= CP_SURR_LOW_MAX) {
+        return Utf8Step(0, 1, false);
+    }
+
+    return Utf8Step($cp, $width, true);
+}
+
+function pushCp(string& $out, uint32 $cp) : void
+{
+    if ($cp < 128) {
+        uint8 $b = $cp;
+        $out->push($b);
+
+        return;
+    }
+
+    if ($cp < 2048) {
+        uint32 $b0 = 192 | ($cp >> 6);
+        uint32 $b1 = 128 | ($cp & 63);
+        uint8 $u0 = $b0;
+        uint8 $u1 = $b1;
+        $out->push($u0);
+        $out->push($u1);
+
+        return;
+    }
+
+    if ($cp < CP_BMP) {
+        uint32 $b0 = 224 | ($cp >> 12);
+        uint32 $b1 = 128 | (($cp >> 6) & 63);
+        uint32 $b2 = 128 | ($cp & 63);
+        uint8 $u0 = $b0;
+        uint8 $u1 = $b1;
+        uint8 $u2 = $b2;
+        $out->push($u0);
+        $out->push($u1);
+        $out->push($u2);
+
+        return;
+    }
+
+    uint32 $b0 = 240 | ($cp >> 18);
+    uint32 $b1 = 128 | (($cp >> 12) & 63);
+    uint32 $b2 = 128 | (($cp >> 6) & 63);
+    uint32 $b3 = 128 | ($cp & 63);
+    uint8 $u0 = $b0;
+    uint8 $u1 = $b1;
+    uint8 $u2 = $b2;
+    uint8 $u3 = $b3;
+    $out->push($u0);
+    $out->push($u1);
+    $out->push($u2);
+    $out->push($u3);
+}
+
+/**
+ * How many bytes this lead promises. Continuation bytes (0x80..0xBF) and 5-byte leads
+ * are 0 — not a character start. Overlong C0/C1 still report 2; `decodeAt` rejects them
+ * with the `$min` check.
+ */
+function utf8LeadWidth(uint8 $lead) : usize
+{
+    if ($lead < 128) {
+        return 1;
+    }
+
+    if ($lead < 192) {
+        return 0;
+    }
+
+    if ($lead < 224) {
+        return 2;
+    }
+
+    if ($lead < 240) {
+        return 3;
+    }
+
+    if ($lead < 248) {
+        return 4;
+    }
+
+    return 0;
+}

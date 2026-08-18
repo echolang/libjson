@@ -1,0 +1,302 @@
+/**
+ * Turning a `Value` into text.
+ *
+ * `dump` is compact, no trailing newline, RFC 8259. `pretty` is the same bytes with newlines and
+ * two-space indent. Two functions, not a options struct: Echo has no default parameter values, and
+ * a struct for one boolean is surface we would then have to keep.
+ *
+ * A well-formed tree cannot fail to dump, so these return `string` rather than `result`. A `NaN` or
+ * an infinity a caller constructed by hand is a `die` - those are not JSON numbers.
+ *
+ * A float is dumped as a token `parse` will classify as a float. `%g` of `1.0` is `1`; that would
+ * come back as an int, so a missing `.` / `e` / `E` gets a `.0` appended.
+ */
+
+namespace json;
+
+private const string HEX = '0123456789abcdef';
+
+public function dump(Value $v) : string
+{
+    Writer $w = Writer(false);
+
+    $w->write($v);
+
+    return $w->out;
+}
+
+public function pretty(Value $v) : string
+{
+    Writer $w = Writer(true);
+
+    $w->write($v);
+
+    return $w->out;
+}
+
+struct Writer
+{
+    string $out;
+    bool $pretty;
+    int32 $level;
+
+    constructor(bool $pretty)
+    {
+        $this->out = '';
+        $this->pretty = $pretty;
+        $this->level = 0;
+    }
+
+    function write(Value $v) : void
+    {
+        match ($v) {
+            Value::none => {
+                $this->out->append('null');
+            },
+            Value::boolean($b) => {
+                if ($b) {
+                    $this->out->append('true');
+                }
+                else {
+                    $this->out->append('false');
+                }
+            },
+            Value::integer($n) => {
+                $this->out->append(str::from($n));
+            },
+            Value::floating($n) => {
+                $this->writeFloat($n);
+            },
+            Value::text($s) => {
+                $this->writeString($s);
+            },
+            Value::list($items) => {
+                $this->writeArray($items);
+            },
+            Value::obj($fields) => {
+                $this->writeObject($fields);
+            },
+        }
+    }
+
+    function writeFloat(float64 $n) : void
+    {
+        if (floatIsNan($n)) {
+            die('json::dump: NaN is not a JSON number');
+        }
+
+        if (floatIsInf($n)) {
+            die('json::dump: infinity is not a JSON number');
+        }
+
+        string $s = str::from($n);
+
+        if (!floatSpelling($s)) {
+            $s->append('.0');
+        }
+
+        $this->out->append($s);
+    }
+
+    function writeString(string $s) : void
+    {
+        $this->out->push(CH_QUOTE);
+
+        usize $n = $s->size();
+        usize $i = 0;
+
+        while ($i < $n) {
+            uint8 $b = $s->byte($i);
+
+            if ($b == CH_QUOTE || $b == CH_BACKSLASH) {
+                $this->out->push(CH_BACKSLASH);
+                $this->out->push($b);
+            }
+            else if ($b == CH_BS) {
+                $this->out->push(CH_BACKSLASH);
+                $this->out->push(CH_LOWER_B);
+            }
+            else if ($b == CH_TAB) {
+                $this->out->push(CH_BACKSLASH);
+                $this->out->push(CH_LOWER_T);
+            }
+            else if ($b == CH_LF) {
+                $this->out->push(CH_BACKSLASH);
+                $this->out->push(CH_LOWER_N);
+            }
+            else if ($b == CH_FF) {
+                $this->out->push(CH_BACKSLASH);
+                $this->out->push(CH_LOWER_F);
+            }
+            else if ($b == CH_CR) {
+                $this->out->push(CH_BACKSLASH);
+                $this->out->push(CH_LOWER_R);
+            }
+            else if ($b < 32) {
+                $this->out->push(CH_BACKSLASH);
+                $this->out->push(CH_LOWER_U);
+                $this->out->push(CH_ZERO);
+                $this->out->push(CH_ZERO);
+                $this->out->push(HEX->byte($b >> 4));
+                $this->out->push(HEX->byte($b & 15));
+            }
+            else {
+                $this->out->push($b);
+            }
+
+            $i = $i + 1;
+        }
+
+        $this->out->push(CH_QUOTE);
+    }
+
+    function writeArray(Items $items) : void
+    {
+        $this->out->push(CH_LSQUARE);
+
+        usize $n = $items->count();
+
+        if ($n == 0) {
+            $this->out->push(CH_RSQUARE);
+
+            return;
+        }
+
+        $this->beginItems();
+        usize $i = 0;
+
+        while ($i < $n) {
+            $this->itemLead();
+            $this->write($items->value($i));
+            $this->itemSep($i, $n);
+            $i = $i + 1;
+        }
+
+        $this->endItems(CH_RSQUARE);
+    }
+
+    function writeObject(Fields $fields) : void
+    {
+        $this->out->push(CH_LCURLY);
+
+        array<string> $keys = $fields->keys();
+        usize $n = $keys->count();
+
+        if ($n == 0) {
+            $this->out->push(CH_RCURLY);
+
+            return;
+        }
+
+        $this->beginItems();
+        usize $i = 0;
+
+        while ($i < $n) {
+            $this->itemLead();
+
+            string $key = $keys[$i];
+
+            $this->writeString($key);
+            $this->out->push(CH_COLON);
+
+            if ($this->pretty) {
+                $this->out->push(CH_SPACE);
+            }
+
+            $this->write($fields->value($key));
+            $this->itemSep($i, $n);
+            $i = $i + 1;
+        }
+
+        $this->endItems(CH_RCURLY);
+    }
+
+    function beginItems() : void
+    {
+        $this->level = $this->level + 1;
+    }
+
+    function itemLead() : void
+    {
+        if ($this->pretty) {
+            $this->writeIndent();
+        }
+    }
+
+    function itemSep(usize $i, usize $n) : void
+    {
+        if ($i + 1 < $n) {
+            $this->out->push(CH_COMMA);
+        }
+    }
+
+    function endItems(uint8 $close) : void
+    {
+        $this->level = $this->level - 1;
+
+        if ($this->pretty) {
+            $this->writeIndent();
+        }
+
+        $this->out->push($close);
+    }
+
+    function writeIndent() : void
+    {
+        $this->out->push(CH_LF);
+
+        int32 $n = $this->level * 2;
+        int32 $i = 0;
+
+        while ($i < $n) {
+            $this->out->push(CH_SPACE);
+            $i = $i + 1;
+        }
+    }
+}
+
+function floatSpelling(const string& $s) : bool
+{
+    if ($s->contains('.')) {
+        return true;
+    }
+
+    if ($s->contains('e')) {
+        return true;
+    }
+
+    if ($s->contains('E')) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * `$n != $n` is the IEEE NaN test. Shared by dump and parse.
+ */
+function floatIsNan(float64 $n) : bool
+{
+    if ($n != $n) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Inf is the only non-zero value that is its own double. `$n * 0.0 != 0.0` looks like the
+ * textbook test, but a folder that rewrites `x * 0` to `0` deletes it.
+ */
+function floatIsInf(float64 $n) : bool
+{
+    if ($n == 0.0) {
+        return false;
+    }
+
+    if ($n + $n == $n) {
+        return true;
+    }
+
+    return false;
+}

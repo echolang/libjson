@@ -1,0 +1,15 @@
+// the shortest thing that works: parse, read, dump.
+//
+//   echoc run -m . examples/parse.eco
+
+string $body = '{"login":"echolang","id":1,"site_admin":false}';
+
+json::Value $res = guard json::parse($body) else ($e) {
+    die("bad json: {$e}");
+}
+
+string $login = $res['login']->asStr() ?? '';
+int64 $id = $res['id']->asInt() ?? 0;
+
+echo "{$login} #{$id}";
+echo json::dump($res);

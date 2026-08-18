@@ -1,0 +1,16 @@
+/*
+ * libjson - JSON for Echo.
+ *
+ * Parse and dump, and a Value you can poke at. There is no C in this module and there does not need
+ * to be: JSON is a spec, not a library we would be wrapping. A consumer writes
+ * `#[depends: "../libjson"]` and nothing else.
+ */
+
+#[module: "libjson"]
+#[version: "0.1.0"]
+
+#[sources: "src/*.eco"]
+
+#[target: test] {
+    #[sources: "tests/*.eco"]
+}

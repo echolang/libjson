@@ -1,0 +1,38 @@
+/**
+ * Named ASCII bytes the rest of the module compares against.
+ *
+ * A mistyped `34` is a name the compiler can refuse. `internal`, not `private`: the other files
+ * in this module read these, and none of them is a surface.
+ */
+
+namespace json;
+
+internal const uint8 CH_BS = 8;
+internal const uint8 CH_TAB = 9;
+internal const uint8 CH_LF = 10;
+internal const uint8 CH_FF = 12;
+internal const uint8 CH_CR = 13;
+internal const uint8 CH_SPACE = 32;
+internal const uint8 CH_QUOTE = 34;
+internal const uint8 CH_PLUS = 43;
+internal const uint8 CH_COMMA = 44;
+internal const uint8 CH_MINUS = 45;
+internal const uint8 CH_DOT = 46;
+internal const uint8 CH_SLASH = 47;
+internal const uint8 CH_ZERO = 48;
+internal const uint8 CH_COLON = 58;
+internal const uint8 CH_UPPER_A = 65;
+internal const uint8 CH_UPPER_E = 69;
+internal const uint8 CH_LSQUARE = 91;
+internal const uint8 CH_BACKSLASH = 92;
+internal const uint8 CH_RSQUARE = 93;
+internal const uint8 CH_LOWER_A = 97;
+internal const uint8 CH_LOWER_B = 98;
+internal const uint8 CH_LOWER_E = 101;
+internal const uint8 CH_LOWER_F = 102;
+internal const uint8 CH_LOWER_N = 110;
+internal const uint8 CH_LOWER_R = 114;
+internal const uint8 CH_LOWER_T = 116;
+internal const uint8 CH_LOWER_U = 117;
+internal const uint8 CH_LCURLY = 123;
+internal const uint8 CH_RCURLY = 125;
