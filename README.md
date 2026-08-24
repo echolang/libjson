@@ -6,7 +6,7 @@ libjson is JSON for [Echo](https://github.com/echolang/echo). When your applicat
 
 That is the whole job. Parse it, dump it, poke at it.
 
-The library is written entirely in Echo. There is no C shim, no extra package, and no build step of its own. You point your module at this directory and start calling `json::parse`.
+The library is written entirely in Echo. There is no C shim, no extra package, and no build step of its own. Add it with epm and start calling `json::parse`.
 
 ```echo
 json::Value $res = guard json::parse($body) else ($e) {
@@ -25,16 +25,13 @@ If some of the pieces here are new (`guard`, `Value`, the `??` after `asStr`), d
 
 ### Adding the dependency
 
-There is no package manager, so a dependency is a path on disk. Put this repository beside your project and name it from your `module.eco`:
+From your project directory:
 
-```echo
-// your module.eco
-#[module: "myapp"]
-#[depends: "../libjson"]
-#[sources: "src/*.eco"]
+```bash
+epm add echolang/libjson --git https://github.com/echolang/libjson --range ^0.1
 ```
 
-That is all. Nothing to link, nothing to install. Echo sees the `json` namespace as soon as the module loads.
+That writes a `#[requires:]` line and vendors the sources. Nothing to link. Echo sees the `json` namespace as soon as the module loads.
 
 ### Your first parse
 
