@@ -190,27 +190,27 @@ public enum Value
     // ---- constructors ---------------------------------------------------------------------------
 
     /** JSON `null`. Named `nil` because `null` is reserved. */
-    static function nil() : Value
+    public static function nil() : Value
     {
         return Value::none;
     }
 
-    static function bool(bool $v) : Value
+    public static function bool(bool $v) : Value
     {
         return Value::boolean($v);
     }
 
-    static function int(int64 $n) : Value
+    public static function int(int64 $n) : Value
     {
         return Value::integer($n);
     }
 
-    static function float(float64 $n) : Value
+    public static function float(float64 $n) : Value
     {
         return Value::floating($n);
     }
 
-    static function str(const string& $s) : Value
+    public static function str(const string& $s) : Value
     {
         return Value::text($s);
     }
@@ -219,7 +219,7 @@ public enum Value
      * An empty JSON array. Named `arr` because `array` is already the container type, and a
      * function of that name in this namespace would steal every `array<T>` spelling.
      */
-    static function arr() : Value
+    public static function arr() : Value
     {
         return Value::list(Items());
     }
@@ -228,12 +228,12 @@ public enum Value
      * Same as `arr`. The leading-dot spelling `.array()` is safe: the name lives on `Value`, so it
      * does not hide the root `array<T>` type the way a free `json::array()` would.
      */
-    static function array() : Value
+    public static function array() : Value
     {
         return Value::arr();
     }
 
-    static function object() : Value
+    public static function object() : Value
     {
         return Value::obj(Fields());
     }
@@ -245,38 +245,38 @@ public enum Value
      * operators stay one overload each.
      */
     #[implicit]
-    static function from(int32 $n) : Value
+    public static function from(int32 $n) : Value
     {
         return Value::int($n);
     }
 
     #[implicit]
-    static function from(int64 $n) : Value
+    public static function from(int64 $n) : Value
     {
         return Value::int($n);
     }
 
     #[implicit]
-    static function from(float64 $n) : Value
+    public static function from(float64 $n) : Value
     {
         return Value::float($n);
     }
 
     #[implicit]
-    static function from(bool $v) : Value
+    public static function from(bool $v) : Value
     {
         return Value::bool($v);
     }
 
     #[implicit]
-    static function from(string $s) : Value
+    public static function from(string $s) : Value
     {
         return Value::str($s);
     }
 
     // ---- predicates -----------------------------------------------------------------------------
 
-    const function isNull() : bool
+    public const function isNull() : bool
     {
         return match ($this) {
             Value::none => true,
@@ -284,7 +284,7 @@ public enum Value
         };
     }
 
-    const function isBool() : bool
+    public const function isBool() : bool
     {
         return match ($this) {
             Value::boolean($v) => true,
@@ -292,7 +292,7 @@ public enum Value
         };
     }
 
-    const function isInt() : bool
+    public const function isInt() : bool
     {
         return match ($this) {
             Value::integer($n) => true,
@@ -300,7 +300,7 @@ public enum Value
         };
     }
 
-    const function isFloat() : bool
+    public const function isFloat() : bool
     {
         return match ($this) {
             Value::floating($n) => true,
@@ -308,7 +308,7 @@ public enum Value
         };
     }
 
-    const function isNumber() : bool
+    public const function isNumber() : bool
     {
         return match ($this) {
             Value::integer($n) => true,
@@ -317,7 +317,7 @@ public enum Value
         };
     }
 
-    const function isStr() : bool
+    public const function isStr() : bool
     {
         return match ($this) {
             Value::text($s) => true,
@@ -325,7 +325,7 @@ public enum Value
         };
     }
 
-    const function isArray() : bool
+    public const function isArray() : bool
     {
         return match ($this) {
             Value::list($items) => true,
@@ -333,7 +333,7 @@ public enum Value
         };
     }
 
-    const function isObject() : bool
+    public const function isObject() : bool
     {
         return match ($this) {
             Value::obj($fields) => true,
@@ -343,7 +343,7 @@ public enum Value
 
     // ---- extractors -----------------------------------------------------------------------------
 
-    const function asBool() : bool?
+    public const function asBool() : bool?
     {
         match ($this) {
             Value::boolean($v) => {
@@ -356,7 +356,7 @@ public enum Value
     }
 
     /** The integer, when this is an `int`. A `1.0` stays a float. */
-    const function asInt() : int64?
+    public const function asInt() : int64?
     {
         match ($this) {
             Value::integer($n) => {
@@ -369,7 +369,7 @@ public enum Value
     }
 
     /** A float, or an int widened. */
-    const function asFloat() : float64?
+    public const function asFloat() : float64?
     {
         match ($this) {
             Value::floating($f) => {
@@ -384,7 +384,7 @@ public enum Value
         }
     }
 
-    const function asStr() : string?
+    public const function asStr() : string?
     {
         match ($this) {
             Value::text($s) => {
@@ -399,7 +399,7 @@ public enum Value
     /**
      * A copy of the array. Children that are arrays or objects still share their box.
      */
-    const function asArray() : array<Value>?
+    public const function asArray() : array<Value>?
     {
         match ($this) {
             Value::list($items) => {
@@ -414,7 +414,7 @@ public enum Value
     /**
      * A copy of the object's map. Children that are arrays or objects still share their box.
      */
-    const function asObject() : ordered_map<string, Value>?
+    public const function asObject() : ordered_map<string, Value>?
     {
         match ($this) {
             Value::obj($fields) => {
@@ -434,7 +434,7 @@ public enum Value
      * Echo `null` is not JSON `null`. `$v->get('x')->isNull()` after a present `"x": null` is true;
      * a missing key never reaches `isNull` because there is no value to ask.
      */
-    const function get(const string& $key) : Value?
+    public const function get(const string& $key) : Value?
     {
         match ($this) {
             Value::obj($fields) => {
@@ -449,7 +449,7 @@ public enum Value
     /**
      * The element at `$i`, or Echo `null` when this is not an array or the index is past the end.
      */
-    const function at(usize $i) : Value?
+    public const function at(usize $i) : Value?
     {
         match ($this) {
             Value::list($items) => {
@@ -494,7 +494,7 @@ public enum Value
     /**
      * Walks `$path` as successive object keys. Stops at the first miss or non-object.
      */
-    const function pick(const array<string>& $path) : Value?
+    public const function pick(const array<string>& $path) : Value?
     {
         Value $cur = $this;
 
@@ -559,7 +559,7 @@ public enum Value
     /**
      * How many entries this array or object holds. Zero for every other kind.
      */
-    const function count() : usize
+    public const function count() : usize
     {
         return match ($this) {
             Value::list($items) => $items->count(),
@@ -575,14 +575,37 @@ public enum Value
      * A cycle (only possible if you tie a node to an ancestor through `[]=`) overflows the stack,
      * the same way `dump` would.
      */
-    const function clone() : Value
+    public const function clone() : Value
     {
-        return match ($this) {
-            Value::list($items) => Value::list($items->clone()),
-            Value::obj($fields) => Value::obj($fields->clone()),
-            else => $this,
-        };
+        match ($this) {
+            Value::list($items) => {
+                return cloneList($items);
+            },
+            Value::obj($fields) => {
+                return cloneObject($fields);
+            },
+            else => {
+                return $this;
+            },
+        }
     }
+}
+
+/**
+ * A payload-binding match arm may not declare a local, so the two deep-copy arms call these.
+ */
+function cloneList(Items $items) : Value
+{
+    Items $copy = $items->clone();
+
+    return Value::list($copy);
+}
+
+function cloneObject(Fields $fields) : Value
+{
+    Fields $copy = $fields->clone();
+
+    return Value::obj($copy);
 }
 
 function widenInt(int64 $n) : float64

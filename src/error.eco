@@ -54,7 +54,7 @@ public enum Error
     /**
      * What went wrong, in words, including the place.
      */
-    const function message() : string
+    public const function message() : string
     {
         string $lead = match ($this) {
             Error::unexpected($at) => 'unexpected token',
