@@ -2,6 +2,8 @@
  * get / at / pick, missing vs JSON null, []= and append.
  */
 
+use ecotest::expect;
+
 #[group: "unit"]
 test object_get_and_set {
     json::Value $obj = json::object();
@@ -10,16 +12,20 @@ test object_get_and_set {
     $obj['ok'] = true;
     $obj['score'] = 1.5;
 
-    string $name = $obj['name']->asStr() ?? '';
-    int64 $age = $obj['age']->asInt() ?? 0;
-    bool $ok = $obj['ok']->asBool() ?? false;
-    float64 $score = $obj['score']->asFloat() ?? 0.0;
+    expect($obj['name']->asStr())->some('mario');
+    expect($obj['age']->asInt())->some(32); // int32 write widens
+    expect($obj['ok']->asBool())->some(true);
+    expect($obj['score']->asFloat())->some(1.5);
+    expect($obj->count())->is(4);
+}
 
-    assert($name == 'mario', 'string write');
-    assert($age == 32, 'int32 write widens');
-    assert($ok == true, 'bool write');
-    assert($score == 1.5, 'float write');
-    assert($obj->count() == 4, 'four keys');
+#[group: "unit"]
+test an_int64_write_is_an_int {
+    json::Value $obj = json::object();
+    int64 $big = 9000000000;
+    $obj['n'] = $big;
+
+    expect($obj['n']->asInt())->some(9000000000);
 }
 
 #[group: "unit"]
@@ -27,20 +33,28 @@ test missing_key_is_echo_null {
     json::Value $obj = json::object();
     $obj['present'] = json::nil();
 
-    assert($obj->get('missing') == null, 'get: a missing key is Echo null');
-    assert($obj->get('present') != null, 'get: a present key is a value');
-    assert(($obj->get('present')?->isNull() ?? false) == true, 'get: JSON null is isNull');
-    assert($obj['missing']->isNull(), '[]: a missing key reads as JSON null');
-    assert($obj['present']->isNull(), '[]: a present JSON null is isNull');
-    assert($obj->count() == 1, 'a read of a missing key does not insert');
+    expect($obj->get('missing'))->none();
+    expect(expect($obj->get('present'))->some()->isNull())->yes(says: 'get: JSON null is isNull');
+    expect($obj['missing']->isNull())->yes(says: '[]: a missing key reads as JSON null');
+    expect($obj['present']->isNull())->yes(says: '[]: a present JSON null is isNull');
+    expect($obj->count())->is(1); // a read of a missing key does not insert
 }
 
 #[group: "unit"]
 test get_on_a_non_object_is_null {
     json::Value $n = json::int(1);
 
-    assert($n->get('x') == null, 'int has no keys');
-    assert($n->at(0) == null, 'int has no indices');
+    expect($n->get('x'))->none();
+    expect($n->at(0))->none();
+}
+
+#[group: "unit"]
+test index_on_a_non_container_reads_as_null {
+    json::Value $n = json::int(1);
+
+    expect($n['x']->isNull())->yes(says: 'an int has no keys');
+    expect($n[0]->isNull())->yes(says: 'an int has no indices');
+    expect($n->asInt())->some(1);
 }
 
 #[group: "unit"]
@@ -50,16 +64,12 @@ test array_append_and_index {
     $arr[] = 2;
     $arr[] = json::bool(false);
 
-    assert($arr->count() == 3, 'three elements');
-    string $first = $arr[0]->asStr() ?? '';
-    int64 $second = $arr[1]->asInt() ?? 0;
-    bool $third = $arr[2]->asBool() ?? true;
-
-    assert($first == 'a', 'first');
-    assert($second == 2, 'second');
-    assert($third == false, 'third');
-    assert($arr->at(3) == null, 'at: past the end is Echo null');
-    assert($arr[3]->isNull(), '[]: past the end reads as JSON null');
+    expect($arr->count())->is(3);
+    expect($arr[0]->asStr())->some('a');
+    expect($arr[1]->asInt())->some(2);
+    expect($arr[2]->asBool())->some(false);
+    expect($arr->at(3))->none(); // past the end
+    expect($arr[3]->isNull())->yes(says: '[]: past the end reads as JSON null');
 }
 
 #[group: "unit"]
@@ -68,7 +78,7 @@ test array_index_write {
     $arr[] = json::int(1);
     $arr[0] = json::int(9);
 
-    assert(($arr->at(0)?->asInt() ?? 0) == 9, 'replaced');
+    expect(expect($arr->at(0))->some()->asInt())->some(9);
 }
 
 #[group: "unit"]
@@ -79,11 +89,8 @@ test array_index_write_primitive {
     $arr[] = 'x';
     $arr[1] = 'y';
 
-    int64 $n = $arr[0]->asInt() ?? 0;
-    string $s = $arr[1]->asStr() ?? '';
-
-    assert($n == 9, 'bare int index write');
-    assert($s == 'y', 'bare string index write');
+    expect($arr[0]->asInt())->some(9);
+    expect($arr[1]->asStr())->some('y');
 }
 
 #[group: "unit"]
@@ -94,11 +101,9 @@ test pick_walks_object_keys {
     json::Value $user = json::object();
     $user['address'] = $addr;
 
-    json::Value? $city = $user->pick(['address', 'city']);
-
-    assert(($city?->asStr() ?? '') == 'berlin', 'picked city');
-    assert($user->pick(['address', 'nope']) == null, 'missing leaf');
-    assert($user->pick(['nope', 'city']) == null, 'missing parent');
+    expect(expect($user->pick(['address', 'city']))->some()->asStr())->some('berlin');
+    expect($user->pick(['address', 'nope']))->none(); // missing leaf
+    expect($user->pick(['nope', 'city']))->none(); // missing parent
 }
 
 #[group: "unit"]
@@ -106,9 +111,9 @@ test missing_key_read_does_not_insert {
     json::Value $obj = json::object();
     string $name = 'missing';
 
-    assert($obj[$name]->isNull(), 'the place reads as JSON null');
-    assert($obj->count() == 0, 'a read of a missing key does not insert');
-    assert($obj->get($name) == null, 'get still says missing');
+    expect($obj[$name]->isNull())->yes(says: 'the place reads as JSON null');
+    expect($obj->count())->is(0);
+    expect($obj->get($name))->none();
 }
 
 #[group: "unit"]
@@ -118,7 +123,7 @@ test chained_append_on_a_nested_array {
     $user['tags'][] = 'echo';
     $user['tags'][] = 'json';
 
-    assert(json::dump($user) == '{"tags":["echo","json"]}', 'append through a read of the array');
+    expect(json::dump($user))->is('{"tags":["echo","json"]}');
 }
 
 #[group: "unit"]
@@ -128,5 +133,33 @@ test rewrite_keeps_key_order {
     $obj['b'] = json::int(2);
     $obj['a'] = json::int(3);
 
-    assert(json::dump($obj) == '{"a":3,"b":2}', 'rewrite does not move the key');
+    expect(json::dump($obj))->is('{"a":3,"b":2}');
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test index_write_past_the_end_dies {
+    json::Value $arr = json::arr();
+    $arr[0] = 1;
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test key_write_on_a_non_object_dies {
+    json::Value $n = json::int(1);
+    $n['x'] = 1;
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test index_write_on_a_non_array_dies {
+    json::Value $n = json::int(1);
+    $n[0] = 1;
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test append_on_a_non_array_dies {
+    json::Value $n = json::int(1);
+    $n[] = 1;
 }

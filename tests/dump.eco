@@ -2,20 +2,22 @@
  * Compact and pretty dump, escape round-trips once parse is in the picture.
  */
 
+use ecotest::expect;
+
 #[group: "unit"]
 test dumps_scalars {
-    assert(json::dump(json::nil()) == 'null', 'null');
-    assert(json::dump(json::bool(true)) == 'true', 'true');
-    assert(json::dump(json::bool(false)) == 'false', 'false');
-    assert(json::dump(json::int(42)) == '42', 'int');
-    assert(json::dump(json::int(-7)) == '-7', 'negative');
-    assert(json::dump(json::str('hi')) == '"hi"', 'string');
+    expect(json::dump(json::nil()))->is('null');
+    expect(json::dump(json::bool(true)))->is('true');
+    expect(json::dump(json::bool(false)))->is('false');
+    expect(json::dump(json::int(42)))->is('42');
+    expect(json::dump(json::int(-7)))->is('-7');
+    expect(json::dump(json::str('hi')))->is('"hi"');
 }
 
 #[group: "unit"]
 test dumps_empty_containers {
-    assert(json::dump(json::arr()) == '[]', 'empty array');
-    assert(json::dump(json::object()) == '{}', 'empty object');
+    expect(json::dump(json::arr()))->is('[]');
+    expect(json::dump(json::object()))->is('{}');
 }
 
 #[group: "unit"]
@@ -24,7 +26,7 @@ test dumps_a_small_object {
     $v['name'] = 'echo';
     $v['n'] = 1;
 
-    assert(json::dump($v) == '{"name":"echo","n":1}', 'compact object');
+    expect(json::dump($v))->is('{"name":"echo","n":1}');
 }
 
 #[group: "unit"]
@@ -36,22 +38,14 @@ test dumps_a_nested_array {
     json::Value $outer = json::arr();
     $outer[] = $inner;
 
-    assert(json::dump($outer) == '[[1,2]]', 'nested array');
+    expect(json::dump($outer))->is('[[1,2]]');
 }
 
 #[group: "unit"]
 test escapes_quotes_and_controls {
-    json::Value $q = json::str('a"b');
-    assert(json::dump($q) == '"a\\"b"', 'quote');
-
-    json::Value $nl = json::str('a\nb');
-    // the source string is a, backslash, n, b - not a newline. build a real newline:
-    string $raw = '';
-    $raw->push(97);
-    $raw->push(10);
-    $raw->push(98);
-
-    assert(json::dump(json::str($raw)) == '"a\\nb"', 'newline');
+    expect(json::dump(json::str('a"b')))->is('"a\\"b"');
+    expect(json::dump(json::str("a\nb")))->is('"a\\nb"');
+    expect(json::dump(json::str("a\tb")))->is('"a\\tb"');
 }
 
 #[group: "unit"]
@@ -59,29 +53,63 @@ test pretty_indents {
     json::Value $v = json::object();
     $v['a'] = json::int(1);
 
-    string $got = json::pretty($v);
-
-    assert($got == "{\n  \"a\": 1\n}", 'two space indent');
+    expect(json::pretty($v))->is("{\n  \"a\": 1\n}");
 }
 
 #[group: "unit"]
 test pretty_empty_stays_tight {
-    assert(json::pretty(json::arr()) == '[]', 'pretty empty array');
-    assert(json::pretty(json::object()) == '{}', 'pretty empty object');
+    expect(json::pretty(json::arr()))->is('[]');
+    expect(json::pretty(json::object()))->is('{}');
 }
 
 #[group: "unit"]
 test interpolation_dumps {
     json::Value $v = json::int(3);
-    string $s = "{$v}";
 
-    assert($s == '3', 'str::from is dump');
+    expect("{$v}")->is('3');
 }
 
 #[group: "unit"]
 test float_dumps_as_a_float_token {
-    assert(json::dump(json::float(1.0)) == '1.0', 'constructed 1.0 keeps a dot');
-    assert(json::dump(mustParse('1.0')) == '1.0', 'parsed 1.0 keeps a dot');
-    assert(mustParse(json::dump(mustParse('1e2')))->isFloat(), '1e2 survives dump then parse');
-    assert(mustParse(json::dump(json::float(1.0)))->isFloat(), 'constructed 1.0 survives dump then parse');
+    expect(json::dump(json::float(1.0)))->is('1.0');
+    expect(json::dump(expect(json::parse('1.0'))->ok()))->is('1.0');
+
+    json::Value $e2 = expect(json::parse(json::dump(expect(json::parse('1e2'))->ok())))->ok();
+    json::Value $one = expect(json::parse(json::dump(json::float(1.0))))->ok();
+
+    expect($e2->isFloat())->yes(says: '1e2 survives dump then parse');
+    expect($one->isFloat())->yes(says: 'constructed 1.0 survives dump then parse');
+}
+
+#[group: "unit"]
+test a_large_float_keeps_its_exponent {
+    float64 $big = 1000000000000000000000000.0;
+    string $out = json::dump(json::float($big * $big * $big));
+
+    expect($out)->is('1e+72');
+    expect(expect(json::parse($out))->ok()->isFloat())->yes(says: 'an exponent is a float token');
+}
+
+#[group: "unit"]
+test float_spelling_reads_either_exponent {
+    expect(json::floatSpelling('1.5'))->yes(says: 'a dot');
+    expect(json::floatSpelling('1e5'))->yes(says: 'a lower e');
+    expect(json::floatSpelling('1E5'))->yes(says: 'an upper E');
+    expect(json::floatSpelling('15'))->no(says: 'digits only');
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test dumping_nan_dies {
+    float64 $zero = 0.0;
+
+    json::dump(json::float($zero / $zero));
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test dumping_infinity_dies {
+    float64 $zero = 0.0;
+
+    json::dump(json::float(1.0 / $zero));
 }

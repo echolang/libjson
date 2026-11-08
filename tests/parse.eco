@@ -2,285 +2,203 @@
  * RFC 8259 fixtures, errors, nesting, unicode.
  */
 
-function mustParse(const string& $text) : json::Value
+use ecotest::expect;
+
+/**
+ * The case name of a refusal, so a check prints `expected unterminated, got unexpected`.
+ */
+function kind(const json::Error& $e) : string
+{
+    return match ($e) {
+        json::Error::unexpected($at) => 'unexpected',
+        json::Error::unterminated($at) => 'unterminated',
+        json::Error::badEscape($at) => 'badEscape',
+        json::Error::badUtf8($at) => 'badUtf8',
+        json::Error::badNumber($at) => 'badNumber',
+        json::Error::tooBig($at) => 'tooBig',
+        json::Error::tooDeep($at) => 'tooDeep',
+        json::Error::trailing($at) => 'trailing',
+        json::Error::empty($at) => 'empty',
+    };
+}
+
+/**
+ * How `$text` was refused, or `ok` when it parsed.
+ */
+function fault(const string& $text) : string
 {
     result<json::Value, json::Error> $r = json::parse($text);
 
-    return $r->unwrap();
-}
+    if ($r->has_value()) {
+        return 'ok';
+    }
 
-function mustFail(const string& $text) : json::Error
-{
-    result<json::Value, json::Error> $r = json::parse($text);
-
-    return $r->failure();
-}
-
-function isUnexpected(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::unexpected($at) => true,
-        else => false,
-    };
-}
-
-function isUnterminated(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::unterminated($at) => true,
-        else => false,
-    };
-}
-
-function isBadEscape(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::badEscape($at) => true,
-        else => false,
-    };
-}
-
-function isBadUtf8(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::badUtf8($at) => true,
-        else => false,
-    };
-}
-
-function isBadNumber(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::badNumber($at) => true,
-        else => false,
-    };
-}
-
-function isTooBig(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::tooBig($at) => true,
-        else => false,
-    };
-}
-
-function isTooDeep(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::tooDeep($at) => true,
-        else => false,
-    };
-}
-
-function isTrailing(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::trailing($at) => true,
-        else => false,
-    };
-}
-
-function isEmpty(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::empty($at) => true,
-        else => false,
-    };
+    return kind($r->failure());
 }
 
 #[group: "unit"]
 test parses_scalars {
-    assert(mustParse('null')->isNull(), 'null');
-    assert((mustParse('true')->asBool() ?? false) == true, 'true');
-    assert((mustParse('false')->asBool() ?? true) == false, 'false');
-    assert((mustParse('42')->asInt() ?? 0) == 42, 'int');
-    assert((mustParse('-7')->asInt() ?? 0) == -7, 'negative');
-    assert((mustParse('0')->asInt() ?? 1) == 0, 'zero');
-    assert((mustParse('"hi"')->asStr() ?? '') == 'hi', 'string');
+    expect(expect(json::parse('null'))->ok()->isNull())->yes(says: 'null');
+    expect(expect(json::parse('true'))->ok()->asBool())->some(true);
+    expect(expect(json::parse('false'))->ok()->asBool())->some(false);
+    expect(expect(json::parse('42'))->ok()->asInt())->some(42);
+    expect(expect(json::parse('-7'))->ok()->asInt())->some(-7);
+    expect(expect(json::parse('0'))->ok()->asInt())->some(0);
+    expect(expect(json::parse('"hi"'))->ok()->asStr())->some('hi');
 }
 
 #[group: "unit"]
 test parses_surrounding_whitespace {
-    json::Value $v = mustParse("  \n\ttrue\r\n  ");
+    json::Value $v = expect(json::parse("  \n\ttrue\r\n  "))->ok();
 
-    assert(($v->asBool() ?? false) == true, 'whitespace around a value');
+    expect($v->asBool())->some(true);
 }
 
 #[group: "unit"]
 test parses_an_array {
-    json::Value $v = mustParse('[1, "a", false, null]');
+    json::Value $v = expect(json::parse('[1, "a", false, null]'))->ok();
 
-    assert($v->isArray(), 'array');
-    assert($v->count() == 4, 'four');
-    int64 $first = $v[0]->asInt() ?? 0;
-    string $second = $v[1]->asStr() ?? '';
-    bool $third = $v[2]->asBool() ?? true;
-
-    assert($first == 1, 'first');
-    assert($second == 'a', 'second');
-    assert($third == false, 'third');
-    assert($v[3]->isNull(), 'fourth is JSON null');
+    expect($v->isArray())->yes(says: 'array');
+    expect($v->count())->is(4);
+    expect($v[0]->asInt())->some(1);
+    expect($v[1]->asStr())->some('a');
+    expect($v[2]->asBool())->some(false);
+    expect($v[3]->isNull())->yes(says: 'fourth is JSON null');
 }
 
 #[group: "unit"]
 test parses_an_object {
-    json::Value $v = mustParse('{"name":"echo","n":1}');
+    json::Value $v = expect(json::parse('{"name":"echo","n":1}'))->ok();
 
-    assert($v->isObject(), 'object');
-    string $name = $v['name']->asStr() ?? '';
-    int64 $n = $v['n']->asInt() ?? 0;
-
-    assert($name == 'echo', 'name');
-    assert($n == 1, 'n');
+    expect($v->isObject())->yes(says: 'object');
+    expect($v['name']->asStr())->some('echo');
+    expect($v['n']->asInt())->some(1);
 }
 
 #[group: "unit"]
 test last_duplicate_key_wins {
-    json::Value $v = mustParse('{"a":1,"a":2}');
+    json::Value $v = expect(json::parse('{"a":1,"a":2}'))->ok();
 
-    int64 $a = $v['a']->asInt() ?? 0;
-
-    assert($a == 2, 'last write wins');
-    assert(json::dump($v) == '{"a":2}', 'order keeps the first key');
+    expect($v['a']->asInt())->some(2);
+    expect(json::dump($v))->is('{"a":2}');
 }
 
 #[group: "unit"]
 test number_with_fraction_is_float {
-    json::Value $v = mustParse('1.5');
+    json::Value $v = expect(json::parse('1.5'))->ok();
 
-    assert($v->isFloat(), 'fraction is float');
-    assert(($v->asFloat() ?? 0.0) == 1.5, '1.5');
+    expect($v->isFloat())->yes(says: 'fraction is float');
+    expect($v->asFloat())->some(1.5);
 }
 
 #[group: "unit"]
 test number_with_exponent_is_float {
-    json::Value $v = mustParse('1e2');
+    json::Value $v = expect(json::parse('1e2'))->ok();
 
-    assert($v->isFloat(), 'exponent is float');
-    assert(($v->asFloat() ?? 0.0) == 100.0, '1e2');
+    expect($v->isFloat())->yes(says: 'exponent is float');
+    expect($v->asFloat())->some(100.0);
 }
 
 #[group: "unit"]
 test empty_containers {
-    assert(mustParse('[]')->isArray(), 'empty array');
-    assert(mustParse('{}')->isObject(), 'empty object');
-    assert(mustParse('[]')->count() == 0, 'array count');
-    assert(mustParse('{}')->count() == 0, 'object count');
+    json::Value $a = expect(json::parse('[]'))->ok();
+    json::Value $o = expect(json::parse('{}'))->ok();
+
+    expect($a->isArray())->yes(says: 'empty array');
+    expect($o->isObject())->yes(says: 'empty object');
+    expect($a->count())->is(0);
+    expect($o->count())->is(0);
 }
 
 #[group: "unit"]
 test string_escapes {
-    assert((mustParse('"\\""')->asStr() ?? '') == '"', 'quote');
-    assert((mustParse('"\\\\"')->asStr() ?? '') == '\\', 'backslash');
-    assert((mustParse('"\\/"')->asStr() ?? '') == '/', 'slash');
-    assert((mustParse('"\\n"')->asStr() ?? '') == "\n", 'newline');
-    assert((mustParse('"\\t"')->asStr() ?? '') == "\t", 'tab');
+    expect(expect(json::parse('"\\""'))->ok()->asStr())->some('"');
+    expect(expect(json::parse('"\\\\"'))->ok()->asStr())->some('\\');
+    expect(expect(json::parse('"\\/"'))->ok()->asStr())->some('/');
+    expect(expect(json::parse('"\\n"'))->ok()->asStr())->some("\n");
+    expect(expect(json::parse('"\\t"'))->ok()->asStr())->some("\t");
 }
 
 #[group: "unit"]
 test unicode_escape {
-    json::Value $v = mustParse('"\\u00e4"');
-
-    assert(($v->asStr() ?? '') == 'ä', 'latin a umlaut');
+    expect(expect(json::parse('"\\u00e4"'))->ok()->asStr())->some('ä');
 }
 
 #[group: "unit"]
 test surrogate_pair {
-    json::Value $v = mustParse('"\\uD83D\\uDE00"');
+    string $got = expect(expect(json::parse('"\\uD83D\\uDE00"'))->ok()->asStr())->some();
 
-    string $got = $v->asStr() ?? '';
-
-    assert($got->size() == 4, 'four utf-8 bytes');
-    assert($got->byte(0) == 240, 'f0');
-    assert($got->byte(1) == 159, '9f');
-    assert($got->byte(2) == 152, '98');
-    assert($got->byte(3) == 128, '80');
+    expect($got)->length(4);
+    expect($got->byte(0))->is(240);
+    expect($got->byte(1))->is(159);
+    expect($got->byte(2))->is(152);
+    expect($got->byte(3))->is(128);
 }
 
 #[group: "unit"]
 test raw_utf8_in_a_string {
-    json::Value $v = mustParse('"ä"');
-
-    assert(($v->asStr() ?? '') == 'ä', 'raw utf-8');
+    expect(expect(json::parse('"ä"'))->ok()->asStr())->some('ä');
 }
 
 #[group: "unit"]
 test empty_input_is_empty {
-    json::Error $e = mustFail('');
-
-    assert(isEmpty($e), 'empty');
+    expect(fault(''))->is('empty');
 }
 
 #[group: "unit"]
 test whitespace_only_is_empty {
-    json::Error $e = mustFail("  \n\t");
-
-    assert(isEmpty($e), 'whitespace only');
+    expect(fault("  \n\t"))->is('empty');
 }
 
 #[group: "unit"]
 test trailing_data {
-    json::Error $e = mustFail('true false');
-
-    assert(isTrailing($e), 'trailing');
+    expect(fault('true false'))->is('trailing');
 }
 
 #[group: "unit"]
 test unterminated_string {
-    json::Error $e = mustFail('"hi');
-
-    assert(isUnterminated($e), 'unterminated');
+    expect(fault('"hi'))->is('unterminated');
 }
 
 #[group: "unit"]
 test unexpected_token {
-    json::Error $e = mustFail(']');
-
-    assert(isUnexpected($e), 'unexpected');
+    expect(fault(']'))->is('unexpected');
 }
 
 #[group: "unit"]
 test leading_zero_is_bad_number {
-    json::Error $e = mustFail('01');
-
-    assert(isBadNumber($e), 'leading zero');
+    expect(fault('01'))->is('badNumber');
 }
 
 #[group: "unit"]
 test trailing_comma {
-    json::Error $e = mustFail('[1,]');
-
-    assert(isUnexpected($e), 'trailing comma');
+    expect(fault('[1,]'))->is('unexpected');
 }
 
 #[group: "unit"]
 test integer_overflow_is_too_big {
-    json::Error $e = mustFail('9223372036854775808');
+    json::Error $e = expect(json::parse('9223372036854775808'))->fails();
 
-    assert(isTooBig($e), 'int64 overflow');
-    assert($e->column() == 1, 'overflow names the start of the token');
+    expect(kind($e))->is('tooBig');
+    expect($e->column())->is(1);
 }
 
 #[group: "unit"]
 test lone_surrogate {
-    json::Error $e = mustFail('"\\uD800"');
-
-    assert(isBadEscape($e), 'lone high surrogate');
+    expect(fault('"\\uD800"'))->is('badEscape');
 }
 
 #[group: "unit"]
 test comments_are_refused {
-    json::Error $e = mustFail('{"a":1 /* no */}');
-
-    assert(isUnexpected($e), 'no comments');
+    expect(fault('{"a":1 /* no */}'))->is('unexpected');
 }
 
 #[group: "unit"]
 test error_carries_a_place {
-    json::Error $e = mustFail("[\n  1,\n  #");
+    json::Error $e = expect(json::parse("[\n  1,\n  #"))->fails();
 
-    assert($e->line() == 3, 'line');
-    assert($e->column() == 3, 'column');
+    expect($e->line())->is(3);
+    expect($e->column())->is(3);
 }
 
 #[group: "unit"]
@@ -300,25 +218,31 @@ test nesting_cap {
         $i = $i + 1;
     }
 
-    json::Error $e = mustFail($deep);
-
-    assert(isTooDeep($e), '129 arrays is too deep');
+    expect(fault($deep))->is('tooDeep');
 }
 
 #[group: "unit"]
 test round_trip_identity {
-    string $src = '{"a":[1,true,null,"x"],"b":1.5}';
-    json::Value $v = mustParse($src);
+    json::Value $v = expect(json::parse('{"a":[1,true,null,"x"],"b":1.5}'))->ok();
     string $out = json::dump($v);
-    json::Value $again = mustParse($out);
+    json::Value $again = expect(json::parse($out))->ok();
 
-    assert(json::dump($again) == $out, 'dump then parse then dump');
+    expect(json::dump($again))->is($out);
 }
 
 #[group: "unit"]
 test interpolation_of_an_error {
-    json::Error $e = mustFail('');
-    string $s = "{$e}";
+    json::Error $e = expect(json::parse(''))->fails();
 
-    assert($s->starts('empty input at '), 'message interpolates');
+    expect("{$e}")->starts('empty input at ');
+}
+
+#[group: "unit"]
+test advance_at_the_end_stays_put {
+    json::Parser $p = json::Parser('');
+
+    $p->advance();
+
+    expect($p->i)->is(0);
+    expect($p->column)->is(1);
 }

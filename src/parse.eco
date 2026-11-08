@@ -360,13 +360,9 @@ struct Parser
         string $token = $this->src->sub($start, $this->i - $start);
 
         if ($isFloat) {
-            float64 $n = guard str::float($token) else {
-                return .error(Error::badNumber($origin));
-            }
-
-            if (floatIsNan($n)) {
-                return .error(Error::badNumber($origin));
-            }
+            // strtod reads every token the grammar above lets through, and none of them is NaN: an
+            // overflow comes back as infinity, which is the only refusal left
+            float64 $n = guard str::float($token);
 
             if (floatIsInf($n)) {
                 return .error(Error::tooBig($origin));

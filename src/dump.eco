@@ -273,15 +273,12 @@ function floatSpelling(const string& $s) : bool
 }
 
 /**
- * `$n != $n` is the IEEE NaN test. Shared by dump and parse.
+ * NaN is the only value not equal to itself. Spelled `!($n == $n)` rather than `$n != $n`:
+ * echoc lowers float `!=` to an ordered compare, which is false for NaN.
  */
 function floatIsNan(float64 $n) : bool
 {
-    if ($n != $n) {
-        return true;
-    }
-
-    return false;
+    return !($n == $n);
 }
 
 /**

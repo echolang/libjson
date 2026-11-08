@@ -25,4 +25,32 @@ jobs:
       - uses: echolang/setup-echo@v1
 
       - name: Build and test
-        run: echoc test
+        run: |
+          epm install
+          echoc test
+
+  # the ecotest runner links libcurl, so this one leaves Windows out, the same as ecotest's own CI.
+  # the line gate lives in ecotest.json
+  coverage:
+    name: coverage (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: echolang/setup-echo@v1
+
+      - name: Install libcurl
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev
+
+      - name: Coverage
+        run: |
+          epm install
+          epm run ecotest --coverage --style simple

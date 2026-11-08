@@ -2,36 +2,65 @@
  * Error as an enum: a named case, the place, interpolation.
  */
 
-function isTooBigCase(const json::Error& $e) : bool
-{
-    return match ($e) {
-        json::Error::tooBig($at) => true,
-        else => false,
-    };
-}
+use ecotest::expect;
 
 #[group: "unit"]
 test a_constructed_error_is_the_named_case {
-    json::Place $at = json::Place(1, 1, 0);
-    json::Error $e = json::Error::tooBig($at);
+    json::Error $e = json::Error::tooBig(json::Place(1, 1, 0));
 
-    assert(isTooBigCase($e), 'tooBig is the case');
-    assert($e->message() == 'number too large at 1:1', 'the sentence comes from the case');
-    assert($e->line() == 1, 'line');
-    assert($e->column() == 1, 'column');
-    assert($e->offset() == 0, 'offset');
+    expect(kind($e))->is('tooBig');
+    expect($e->message())->is('number too large at 1:1');
+    expect($e->line())->is(1);
+    expect($e->column())->is(1);
+    expect($e->offset())->is(0);
 }
 
 #[group: "unit"]
 test interpolating_an_error_is_the_sentence {
     json::Error $e = json::Error::empty(json::Place(1, 1, 0));
 
-    assert("{$e}" == 'empty input at 1:1', 'str::from reads the message');
+    expect("{$e}")->is('empty input at 1:1');
 }
 
 #[group: "unit"]
 test bad_utf8_is_not_an_escape {
     json::Error $e = json::Error::badUtf8(json::Place(1, 2, 1));
 
-    assert($e->message() == 'invalid UTF-8 at 1:2', 'UTF-8 has its own sentence');
+    expect($e->message())->is('invalid UTF-8 at 1:2');
+}
+
+#[group: "unit"]
+test every_case_has_its_sentence_and_place {
+    json::Place $at = json::Place(2, 5, 9);
+    array<json::Error> $cases = [
+        json::Error::unexpected($at),
+        json::Error::unterminated($at),
+        json::Error::badEscape($at),
+        json::Error::badUtf8($at),
+        json::Error::badNumber($at),
+        json::Error::tooBig($at),
+        json::Error::tooDeep($at),
+        json::Error::trailing($at),
+        json::Error::empty($at),
+    ];
+    array<string> $sentences = [
+        'unexpected token at 2:5',
+        'unterminated value at 2:5',
+        'invalid escape at 2:5',
+        'invalid UTF-8 at 2:5',
+        'invalid number at 2:5',
+        'number too large at 2:5',
+        'nesting too deep at 2:5',
+        'trailing data at 2:5',
+        'empty input at 2:5',
+    ];
+
+    for (usize $i = 0; $i < $cases->count(); $i++) {
+        $row = ecotest::context(kind($cases[$i]));
+
+        expect($cases[$i]->message())->is($sentences[$i]);
+        expect($cases[$i]->line())->is(2);
+        expect($cases[$i]->column())->is(5);
+        expect($cases[$i]->offset())->is(9);
+    }
 }

@@ -336,10 +336,19 @@ RFC 8259, nothing else.
 ## Running the Tests
 
 ```bash
+epm install
 echoc test
 ```
 
-No network, no extra packages, no C. The suite covers the constructors, the bracket, dump, pretty, RFC fixtures, unicode, and matching the error cases.
+No network, no C. The suite covers the constructors, the bracket, dump, pretty, RFC fixtures, unicode, and matching the error cases. Its checks are [ecotest](https://github.com/echolang/ecotest)'s `expect`, which only the test target requires, so a consumer of libjson never compiles it.
+
+For coverage, run the ecotest runner:
+
+```bash
+epm run ecotest --coverage
+```
+
+`ecotest.json` holds the gate: every line of `src/` runs, and CI fails the build when one stops.
 
 ## Trying the Examples
 
