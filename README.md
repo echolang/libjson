@@ -345,10 +345,10 @@ No network, no C. The suite covers the constructors, the bracket, dump, pretty, 
 For coverage, run the ecotest runner:
 
 ```bash
-epm run ecotest --coverage
+epm run ecotest --coverage --min-coverage 100
 ```
 
-`ecotest.json` holds the gate: every line of `src/` runs, and CI fails the build when one stops.
+That is the gate CI holds on macOS and Linux: every line of `src/` runs, and the build fails when one stops. Windows runs the same runner without coverage.
 
 ## Trying the Examples
 
