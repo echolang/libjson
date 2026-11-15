@@ -1,0 +1,650 @@
+/**
+ * `json::dump<bson>` - a `Value` as one BSON document.
+ *
+ * A string has no byte setter, so a document's length cannot be patched in after the fact. Each
+ * document is written into a body of its own and framed behind its length when it is done. Nesting
+ * copies each body once per level, which is the price of not reaching for a pointer.
+ *
+ * An object is an Extended JSON wrapper only when its shape is exact: the right keys, nothing
+ * extra, and every value of the right kind. `{"$oid": "nope"}` is an ordinary document with a key
+ * called `$oid`.
+ *
+ * A key with a `0x00` byte is the one thing an object can hold that BSON cannot. The failure names
+ * the member by JSON Pointer, and the pointer is put together on the way out, so a write that works
+ * never builds one.
+ */
+
+namespace json;
+
+private const int64 INT32_MIN = -2147483648;
+private const int64 INT32_MAX = 2147483647;
+private const int64 UINT32_MAX = 4294967295;
+
+private const uint64 BITS_NAN = 9221120237041090560;
+private const uint64 BITS_INF = 9218868437227405312;
+private const uint64 BITS_NEG_INF = 18442240474082181120;
+
+/**
+ * A BSON type tag and the bytes that follow the key.
+ */
+struct Special
+{
+    uint8 $tag;
+    string $payload;
+}
+
+/**
+ * The one way a write below the root fails: a key with a `0x00` byte, named by the pointer to its
+ * member. The root hands it on as `DumpError::nulByte`.
+ */
+struct NulKey
+{
+    string $pointer;
+}
+
+/**
+ * The two members of `{"$code": "...", "$scope": {...}}`.
+ */
+struct CodeScope
+{
+    string $code;
+    Fields $scope;
+}
+
+function bsonRoot(Value $v) : result<string, DumpError>
+{
+    match ($v) {
+        Value::obj($fields) => {
+            string $body = guard bsonFields($fields) else ($e) {
+                return .error(.nulByte($e->pointer));
+            }
+            string $out = '';
+
+            bsonFrame($out, $body);
+
+            return .ok($out);
+        },
+        else => {
+            return .error(.notObject);
+        },
+    }
+}
+
+/**
+ * The elements of `$fields`, unframed: the caller puts the length in front as it copies them out.
+ */
+function bsonFields(Fields $fields) : result<string, NulKey>
+{
+    string $body = '';
+
+    foreach ($fields->keys() as const &$key) {
+        if (!nulFree($key)) {
+            return .error(nested($key, NulKey('')));
+        }
+
+        guard bsonElement($body, $key, $fields->value($key)) else ($e) {
+            return .error(nested($key, $e));
+        }
+    }
+
+    return .ok($body);
+}
+
+function bsonItems(Items $items) : result<string, NulKey>
+{
+    string $body = '';
+    usize $n = $items->count();
+    usize $i = 0;
+
+    while ($i < $n) {
+        string $key = str::from($i);
+
+        guard bsonElement($body, $key, $items->value($i)) else ($e) {
+            return .error(nested($key, $e));
+        }
+
+        $i = $i + 1;
+    }
+
+    return .ok($body);
+}
+
+/**
+ * `$e` from one level down, with the member it happened under in front of its pointer.
+ */
+function nested(const string& $token, NulKey $e) : NulKey
+{
+    return NulKey(str::concat(str::concat('/', escape($token)), $e->pointer));
+}
+
+/**
+ * A finished body behind its length, with the closing `0x00`. The length counts all of it.
+ */
+function bsonFrame(string& $out, const string& $body) : void
+{
+    pushSized($out, $body, 5);
+    $out->push(BSON_END);
+}
+
+/**
+ * `$body` behind an int32 length that counts `$extra` bytes beyond the body: the length itself, a
+ * closing `0x00`, or both, depending on what the format counts.
+ */
+function pushSized(string& $out, const string& $body, usize $extra) : void
+{
+    pushLittle($out, ($body->size() + $extra) as uint64, 4);
+    $out->append($body);
+}
+
+function bsonElement(string& $out, const string& $key, Value $v) : status<NulKey>
+{
+    match ($v) {
+        Value::none => {
+            bsonHead($out, BSON_NULL, $key);
+        },
+        Value::boolean($b) => {
+            bsonHead($out, BSON_BOOL, $key);
+            $out->push($b as uint8);
+        },
+        Value::integer($n) => {
+            bsonInt($out, $key, $n);
+        },
+        Value::floating($n) => {
+            bsonHead($out, BSON_DOUBLE, $key);
+            pushLittle($out, mem::bit_cast<uint64, float64>($n), 8);
+        },
+        Value::text($s) => {
+            bsonHead($out, BSON_STRING, $key);
+            pushString($out, $s);
+        },
+        Value::list($items) => {
+            string $doc = try bsonItems($items);
+
+            bsonHead($out, BSON_ARRAY, $key);
+            bsonFrame($out, $doc);
+        },
+        Value::obj($fields) => {
+            try bsonObject($out, $key, $fields);
+        },
+    }
+
+    return .ok;
+}
+
+function bsonObject(string& $out, const string& $key, Fields $fields) : status<NulKey>
+{
+    Special $s = guard bsonSpecial($fields) else {
+        return bsonDocument($out, $key, $fields);
+    }
+
+    bsonHead($out, $s->tag, $key);
+    $out->append($s->payload);
+
+    return .ok;
+}
+
+/**
+ * Code with a scope, or else an ordinary document. The scope is the one wrapper member that is a
+ * document of its own, so this is the one wrapper whose write can fail, and it is written here
+ * where that failure can go out with its pointer.
+ */
+function bsonDocument(string& $out, const string& $key, Fields $fields) : status<NulKey>
+{
+    CodeScope $cs = guard codeScope($fields) else {
+        string $doc = try bsonFields($fields);
+
+        bsonHead($out, BSON_DOCUMENT, $key);
+        bsonFrame($out, $doc);
+
+        return .ok;
+    }
+
+    string $doc = guard bsonFields($cs->scope) else ($e) {
+        return .error(nested('$scope', $e));
+    }
+    string $body = '';
+
+    pushString($body, $cs->code);
+    bsonFrame($body, $doc);
+    bsonHead($out, BSON_CODE_SCOPE, $key);
+    pushSized($out, $body, 4);
+
+    return .ok;
+}
+
+/**
+ * An int that fits in 32 bits is an int32, the rest an int64. Reading either back gives an `int`.
+ */
+function bsonInt(string& $out, const string& $key, int64 $n) : void
+{
+    if ($n >= INT32_MIN && $n <= INT32_MAX) {
+        bsonHead($out, BSON_INT32, $key);
+        pushLittle($out, $n as uint64, 4);
+
+        return;
+    }
+
+    bsonHead($out, BSON_INT64, $key);
+    pushLittle($out, $n as uint64, 8);
+}
+
+function bsonHead(string& $out, uint8 $tag, const string& $key) : void
+{
+    $out->push($tag);
+    pushCstring($out, $key);
+}
+
+/**
+ * The low `$n` bytes of `$v`, least significant first.
+ */
+function pushLittle(string& $out, uint64 $v, usize $n) : void
+{
+    usize $k = 0;
+
+    while ($k < $n) {
+        $out->push((($v >> ($k * 8)) & 255) as uint8);
+        $k = $k + 1;
+    }
+}
+
+/**
+ * A BSON string: length, bytes, `0x00`. The bytes may hold a `0x00`; the length says where they end.
+ */
+function pushString(string& $out, const string& $s) : void
+{
+    pushSized($out, $s, 1);
+    $out->push(BSON_END);
+}
+
+/**
+ * Whether `$s` can be a key or a regex part. Those end at the first `0x00`, so they cannot hold one.
+ * JSON allows `"\u0000"` in a key; BSON has no way to say it.
+ */
+function nulFree(const string& $s) : bool
+{
+    return !$s->contains("\x00");
+}
+
+/**
+ * A key or a regex part, ended by `0x00`. The caller has checked it with `nulFree`.
+ */
+function pushCstring(string& $out, const string& $s) : void
+{
+    $out->append($s);
+    $out->push(BSON_END);
+}
+
+// ---- Extended JSON wrappers ---------------------------------------------------------------------
+
+/**
+ * The BSON type an object stands for, or `null` when it is an ordinary document.
+ */
+function bsonSpecial(Fields $f) : Special?
+{
+    if ($f->count() != 1) {
+        return null;
+    }
+
+    string $name = $f->keys()[0];
+    Value $v = $f->value($name);
+
+    if ($name == '$oid') {
+        string $raw = guard oidBytes($v) else {
+            return null;
+        }
+
+        return Special(BSON_OBJECTID, $raw);
+    }
+
+    if ($name == '$date') {
+        return specialDate($v);
+    }
+
+    if ($name == '$numberLong') {
+        int64 $n = guard longText($v) else {
+            return null;
+        }
+
+        return Special(BSON_INT64, little64($n as uint64));
+    }
+
+    if ($name == '$numberDouble') {
+        return specialDouble($v);
+    }
+
+    if ($name == '$binary') {
+        return specialBinary($v);
+    }
+
+    if ($name == '$undefined') {
+        if ($v->asBool() ?? false) {
+            return Special(BSON_UNDEFINED, '');
+        }
+
+        return null;
+    }
+
+    if ($name == '$regularExpression') {
+        return specialRegex($v);
+    }
+
+    if ($name == '$dbPointer') {
+        return specialDbPointer($v);
+    }
+
+    if ($name == '$code') {
+        return specialString(BSON_CODE, $v);
+    }
+
+    if ($name == '$symbol') {
+        return specialString(BSON_SYMBOL, $v);
+    }
+
+    if ($name == '$timestamp') {
+        return specialTimestamp($v);
+    }
+
+    if ($name == '$minKey') {
+        return specialKey(BSON_MINKEY, $v);
+    }
+
+    if ($name == '$maxKey') {
+        return specialKey(BSON_MAXKEY, $v);
+    }
+
+    return null;
+}
+
+/**
+ * `$code` and `$symbol`: a string, written as a BSON string under `$tag`.
+ */
+function specialString(uint8 $tag, const Value& $v) : Special?
+{
+    string $s = guard $v->asStr() else {
+        return null;
+    }
+
+    string $payload = '';
+
+    pushString($payload, $s);
+
+    return Special($tag, $payload);
+}
+
+/**
+ * `$minKey` and `$maxKey`: always `1`, and nothing after the key.
+ */
+function specialKey(uint8 $tag, const Value& $v) : Special?
+{
+    if (($v->asInt() ?? 0) != 1) {
+        return null;
+    }
+
+    return Special($tag, '');
+}
+
+/**
+ * The decimal digits a `$numberLong` holds, as the number.
+ */
+function longText(const Value& $v) : int64?
+{
+    string $s = guard $v->asStr() else {
+        return null;
+    }
+
+    return str::int($s);
+}
+
+/**
+ * `{"$numberLong": "<ms>"}`, milliseconds since the epoch.
+ */
+function specialDate(const Value& $v) : Special?
+{
+    if ($v->count() != 1) {
+        return null;
+    }
+
+    Value $n = guard $v->get('$numberLong') else {
+        return null;
+    }
+    int64 $ms = guard longText($n) else {
+        return null;
+    }
+
+    return Special(BSON_DATETIME, little64($ms as uint64));
+}
+
+function specialDouble(const Value& $v) : Special?
+{
+    string $s = guard $v->asStr() else {
+        return null;
+    }
+
+    if ($s == 'NaN') {
+        return Special(BSON_DOUBLE, little64(BITS_NAN));
+    }
+
+    if ($s == 'Infinity') {
+        return Special(BSON_DOUBLE, little64(BITS_INF));
+    }
+
+    if ($s == '-Infinity') {
+        return Special(BSON_DOUBLE, little64(BITS_NEG_INF));
+    }
+
+    float64 $n = guard str::float($s) else {
+        return null;
+    }
+
+    return Special(BSON_DOUBLE, little64(mem::bit_cast<uint64, float64>($n)));
+}
+
+/**
+ * `{"base64": "...", "subType": "<hex>"}`. Subtype 0x02 gets its inner length back in front.
+ */
+function specialBinary(const Value& $v) : Special?
+{
+    if ($v->count() != 2) {
+        return null;
+    }
+
+    string $text = guard $v->get('base64')?->asStr() else {
+        return null;
+    }
+    string $hex = guard $v->get('subType')?->asStr() else {
+        return null;
+    }
+    string $data = guard base64Decode($text) else {
+        return null;
+    }
+    uint8 $subtype = guard subtypeByte($hex) else {
+        return null;
+    }
+
+    if ($subtype == BSON_BINARY_OLD) {
+        string $inner = '';
+
+        pushSized($inner, $data, 0);
+        $data = $inner;
+    }
+
+    string $payload = '';
+
+    pushLittle($payload, $data->size() as uint64, 4);
+    $payload->push($subtype);
+    $payload->append($data);
+
+    return Special(BSON_BINARY, $payload);
+}
+
+/**
+ * One or two hex digits.
+ */
+function subtypeByte(const string& $hex) : uint8?
+{
+    usize $n = $hex->size();
+
+    if ($n < 1 || $n > 2) {
+        return null;
+    }
+
+    int32 $out = 0;
+    usize $i = 0;
+
+    while ($i < $n) {
+        int32 $d = hexNibble($hex->byte($i));
+
+        if ($d < 0) {
+            return null;
+        }
+
+        $out = $out * 16 + $d;
+        $i = $i + 1;
+    }
+
+    return $out as uint8;
+}
+
+function specialRegex(const Value& $v) : Special?
+{
+    if ($v->count() != 2) {
+        return null;
+    }
+
+    string $pattern = guard $v->get('pattern')?->asStr() else {
+        return null;
+    }
+    string $options = guard $v->get('options')?->asStr() else {
+        return null;
+    }
+
+    if (!nulFree($pattern) || !nulFree($options)) {
+        return null;
+    }
+    // the spec writes the flags in alphabetical order, so "mix" goes out as "imx"
+    array<string> $flags = str::chars($options)->owned();
+
+    $flags->sort();
+
+    string $payload = '';
+
+    pushCstring($payload, $pattern);
+    pushCstring($payload, str::join($flags, ''));
+
+    return Special(BSON_REGEX, $payload);
+}
+
+function specialDbPointer(const Value& $v) : Special?
+{
+    if ($v->count() != 2) {
+        return null;
+    }
+
+    string $ns = guard $v->get('$ref')?->asStr() else {
+        return null;
+    }
+    Value $id = guard $v->get('$id') else {
+        return null;
+    }
+
+    if ($id->count() != 1) {
+        return null;
+    }
+
+    Value $oid = guard $id->get('$oid') else {
+        return null;
+    }
+    string $raw = guard oidBytes($oid) else {
+        return null;
+    }
+    string $payload = '';
+
+    pushString($payload, $ns);
+    $payload->append($raw);
+
+    return Special(BSON_DBPOINTER, $payload);
+}
+
+function specialTimestamp(const Value& $v) : Special?
+{
+    if ($v->count() != 2) {
+        return null;
+    }
+
+    int64 $t = guard $v->get('t')?->asInt() else {
+        return null;
+    }
+    int64 $i = guard $v->get('i')?->asInt() else {
+        return null;
+    }
+
+    if ($t < 0 || $t > UINT32_MAX || $i < 0 || $i > UINT32_MAX) {
+        return null;
+    }
+
+    return Special(BSON_TIMESTAMP, little64((($t as uint64) << 32) | ($i as uint64)));
+}
+
+/**
+ * The code and the scope of `{"$code": "...", "$scope": {...}}`, or `null` when `$f` is not that
+ * shape.
+ */
+function codeScope(const Fields& $f) : CodeScope?
+{
+    if ($f->count() != 2) {
+        return null;
+    }
+
+    string $code = guard $f->get('$code')?->asStr() else {
+        return null;
+    }
+
+    match ($f->get('$scope') ?? Value::nil()) {
+        Value::obj($scope) => {
+            return CodeScope($code, $scope);
+        },
+        else => {
+            return null;
+        },
+    }
+}
+
+/**
+ * The twelve bytes of a 24-digit hex ObjectId, or `null` for any other string or kind.
+ */
+function oidBytes(const Value& $v) : string?
+{
+    string $hex = guard $v->asStr() else {
+        return null;
+    }
+
+    if ($hex->size() != OID_BYTES * 2) {
+        return null;
+    }
+
+    string $out = '';
+    usize $i = 0;
+
+    while ($i < $hex->size()) {
+        int32 $hi = hexNibble($hex->byte($i));
+        int32 $lo = hexNibble($hex->byte($i + 1));
+
+        if ($hi < 0 || $lo < 0) {
+            return null;
+        }
+
+        $out->push(($hi * 16 + $lo) as uint8);
+        $i = $i + 2;
+    }
+
+    return $out;
+}
+
+function little64(uint64 $v) : string
+{
+    string $out = '';
+
+    pushLittle($out, $v, 8);
+
+    return $out;
+}

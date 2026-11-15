@@ -16,6 +16,16 @@ public function from(const json::Error& $e) : string
     return $e->message();
 }
 
+public function from(const json::PointerError& $e) : string
+{
+    return $e->message();
+}
+
+public function from(const json::DumpError& $e) : string
+{
+    return $e->message();
+}
+
 public function from(json::Value $v) : string
 {
     return json::dump($v);

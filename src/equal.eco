@@ -1,0 +1,123 @@
+/**
+ * `==` and `!=` on a `Value`: deep equality, by content.
+ *
+ * Arrays compare element by element in order. Objects compare by their set of members, so key order
+ * does not matter (`{"a":1,"b":2}` is `{"b":2,"a":1}`). Numbers compare by value across int and
+ * float, so `1` is `1.0`; the int is widened first, the same widening `asFloat` does.
+ *
+ * Needs echoc 0.14.2 or later. 0.14.0 refused an operator on an enum declared in a file compiled
+ * before the enum's own, and this file sorts before `value.eco`.
+ */
+
+namespace json;
+
+/**
+ * A bare `5` or `'mario'` on either side becomes a `Value` through the inbound `#[implicit]`s, so
+ * `$v == 5` needs no overload of its own.
+ */
+operator (const Value& $a) == (const Value& $b) : bool
+{
+    return equal($a, $b);
+}
+
+operator (const Value& $a) != (const Value& $b) : bool
+{
+    return !equal($a, $b);
+}
+
+function equal(const Value& $a, const Value& $b) : bool
+{
+    return match ($a) {
+        Value::none => $b->isNull(),
+        Value::boolean($x) => equalBool($x, $b),
+        Value::integer($n) => equalNumber(widenInt($n), $b),
+        Value::floating($n) => equalNumber($n, $b),
+        Value::text($s) => equalText($s, $b),
+        Value::list($items) => equalList($items, $b),
+        Value::obj($fields) => equalObject($fields, $b),
+    };
+}
+
+function equalBool(bool $x, const Value& $b) : bool
+{
+    return match ($b) {
+        Value::boolean($y) => $x == $y,
+        else => false,
+    };
+}
+
+/**
+ * Two int64s beyond 2^53 that widen to the same double compare equal. nlohmann widens the same way.
+ */
+function equalNumber(float64 $x, const Value& $b) : bool
+{
+    return match ($b) {
+        Value::integer($n) => $x == widenInt($n),
+        Value::floating($n) => $x == $n,
+        else => false,
+    };
+}
+
+function equalText(const string& $s, const Value& $b) : bool
+{
+    return match ($b) {
+        Value::text($t) => $s == $t,
+        else => false,
+    };
+}
+
+function equalList(Items $items, const Value& $b) : bool
+{
+    return match ($b) {
+        Value::list($other) => equalItems($items, $other),
+        else => false,
+    };
+}
+
+function equalObject(Fields $fields, const Value& $b) : bool
+{
+    return match ($b) {
+        Value::obj($other) => equalFields($fields, $other),
+        else => false,
+    };
+}
+
+function equalItems(Items $a, Items $b) : bool
+{
+    usize $n = $a->count();
+
+    if ($n != $b->count()) {
+        return false;
+    }
+
+    usize $i = 0;
+
+    while ($i < $n) {
+        if (!equal($a->value($i), $b->value($i))) {
+            return false;
+        }
+
+        $i = $i + 1;
+    }
+
+    return true;
+}
+
+function equalFields(Fields $a, Fields $b) : bool
+{
+    if ($a->count() != $b->count()) {
+        return false;
+    }
+
+    foreach ($a->keys() as const &$key) {
+        Value $theirs = guard $b->get($key) else {
+            return false;
+        }
+
+        if (!equal($a->value($key), $theirs)) {
+            return false;
+        }
+    }
+
+    return true;
+}

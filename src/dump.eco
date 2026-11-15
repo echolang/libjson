@@ -8,13 +8,17 @@
  * A well-formed tree cannot fail to dump, so these return `string` rather than `result`. A `NaN` or
  * an infinity a caller constructed by hand is a `die` - those are not JSON numbers.
  *
- * A float is dumped as a token `parse` will classify as a float. `%g` of `1.0` is `1`; that would
- * come back as an int, so a missing `.` / `e` / `E` gets a `.0` appended.
+ * A float is dumped as the shortest text that reads back as the same double, so a dump then parse
+ * hands back the bits that went in. It is also a token `parse` will classify as a float: `%g` of
+ * `1.0` is `1`, which would come back as an int, so a missing `.` / `e` / `E` gets a `.0` appended.
  */
 
 namespace json;
 
 private const string HEX = '0123456789abcdef';
+
+// below this magnitude a float is spelled out in full (`100.0`, not `1e+02`)
+private const float64 FIXED_BELOW = 1000000000000000.0;
 
 public function dump(Value $v) : string
 {
@@ -89,7 +93,7 @@ struct Writer
             die('json::dump: infinity is not a JSON number');
         }
 
-        string $s = str::from($n);
+        string $s = shortestFloat($n);
 
         if (!floatSpelling($s)) {
             $s->append('.0');
@@ -253,6 +257,78 @@ struct Writer
             $i = $i + 1;
         }
     }
+}
+
+/**
+ * The shortest `%g` spelling that reads back as `$n`. A precision that round-trips keeps doing so
+ * one digit later, because the nearest decimal with one more digit is never farther away, so a
+ * binary search over 1 to 17 finds the smallest one. 17 digits always round-trip.
+ *
+ * `%g` switches to an exponent once the exponent reaches the precision, which spells `100.0` as
+ * `1e+02`. Below `FIXED_BELOW` the number is written out in full instead, the same cut-off nlohmann
+ * makes. A shortest spelling with an exponent at or above its precision has no fraction, and below
+ * `FIXED_BELOW` that is a whole number under 2^53, so seventeen digits print exactly its digits.
+ */
+function shortestFloat(float64 $n) : string
+{
+    int32 $lo = 1;
+    int32 $hi = 17;
+
+    while ($lo < $hi) {
+        int32 $mid = ($lo + $hi) / 2;
+
+        if (roundTrips($n, $mid)) {
+            $hi = $mid;
+        }
+        else {
+            $lo = $mid + 1;
+        }
+    }
+
+    string $s = str::from($n, ".{$lo}g");
+
+    if (!$s->contains('e')) {
+        return $s;
+    }
+
+    float64 $m = magnitude($n);
+
+    if ($m < 1.0 || $m >= FIXED_BELOW) {
+        return $s;
+    }
+
+    return str::from($n, '.17g');
+}
+
+function roundTrips(float64 $n, int32 $precision) : bool
+{
+    return decimal(str::from($n, ".{$precision}g")) == $n;
+}
+
+/**
+ * The double `$text` spells. Only for text that is a number already: one `%g` wrote, or a token
+ * `parse` has checked against the grammar. `strtod` reads those to the end, so a refusal here is a
+ * bug in this module and dies.
+ */
+function decimal(const string& $text) : float64
+{
+    float64 $n = guard str::float($text) else {
+        die("json: '{$text}' does not read as a number");
+    }
+
+    return $n;
+}
+
+/**
+ * `$n` without its sign.
+ */
+function magnitude(float64 $n) : float64
+{
+    if ($n < 0.0) {
+        return 0.0 - $n;
+    }
+
+    return $n;
 }
 
 function floatSpelling(const string& $s) : bool

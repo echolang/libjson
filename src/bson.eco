@@ -1,0 +1,69 @@
+/**
+ * BSON, MongoDB's binary document format, read into and written from the same `Value`.
+ *
+ *     use json::bson;
+ *
+ *     json::Value $doc = guard json::parse<bson>(bytes: $bytes);
+ *     string $out = guard json::dump<bson>(value: $doc);
+ *
+ * The types JSON has map onto `Value` directly. int32 and int64 are both `int`, and the writer picks
+ * int32 whenever the number fits. The types JSON lacks are read as MongoDB Extended JSON v2 wrapper
+ * objects (`{"$oid": "..."}`, `{"$date": {"$numberLong": "..."}}`, ...), and the writer turns an
+ * object of exactly that shape back into the BSON type. Anything that only looks close is written
+ * as an ordinary document.
+ *
+ * decimal128 is not read yet. Its tag is refused as `.unexpected`.
+ */
+
+namespace json;
+
+internal const uint8 BSON_END = 0;
+internal const uint8 BSON_DOUBLE = 1;
+internal const uint8 BSON_STRING = 2;
+internal const uint8 BSON_DOCUMENT = 3;
+internal const uint8 BSON_ARRAY = 4;
+internal const uint8 BSON_BINARY = 5;
+internal const uint8 BSON_UNDEFINED = 6;
+internal const uint8 BSON_OBJECTID = 7;
+internal const uint8 BSON_BOOL = 8;
+internal const uint8 BSON_DATETIME = 9;
+internal const uint8 BSON_NULL = 10;
+internal const uint8 BSON_REGEX = 11;
+internal const uint8 BSON_DBPOINTER = 12;
+internal const uint8 BSON_CODE = 13;
+internal const uint8 BSON_SYMBOL = 14;
+internal const uint8 BSON_CODE_SCOPE = 15;
+internal const uint8 BSON_INT32 = 16;
+internal const uint8 BSON_TIMESTAMP = 17;
+internal const uint8 BSON_INT64 = 18;
+internal const uint8 BSON_MAXKEY = 127;
+internal const uint8 BSON_MINKEY = 255;
+
+// binary subtype 0x02 carries its own length in front of the payload
+internal const uint8 BSON_BINARY_OLD = 2;
+
+// an ObjectId is twelve bytes, spelled as twenty-four hex digits
+internal const usize OID_BYTES = 12;
+
+public struct bson : Format
+{
+    /**
+     * One BSON document from `$bytes`. The whole input must be that document, and nothing after it.
+     */
+    public static function parse(const string& $bytes) : result<Value, Error>
+    {
+        BsonReader $r = BsonReader($bytes);
+
+        return $r->run();
+    }
+
+    /**
+     * `$v` as one BSON document. The root must be an object, and no key may hold a `0x00` byte;
+     * either is a `DumpError`. A regex that holds one is not a regex, and is written as the
+     * ordinary document it is.
+     */
+    public static function dump(Value $v) : result<string, DumpError>
+    {
+        return bsonRoot($v);
+    }
+}

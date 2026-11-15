@@ -1,0 +1,64 @@
+/**
+ * elements() / members(): iteration without a copy.
+ */
+
+use ecotest::expect;
+
+#[group: "unit"]
+test elements_walk_an_array_by_index {
+    json::Value $arr = expect(json::parse('["a","b"]'))->ok();
+    string $seen = '';
+
+    foreach ($arr->elements() as $i => const &$item) {
+        string $s = $item->asStr() ?? '';
+
+        $seen->append("{$i}{$s}");
+    }
+
+    expect($seen)->is('0a1b');
+}
+
+#[group: "unit"]
+test members_walk_an_object_in_order {
+    json::Value $obj = expect(json::parse('{"z":1,"a":2}'))->ok();
+    string $seen = '';
+
+    foreach ($obj->members() as $key => const &$item) {
+        $seen->append("{$key}={$item};");
+    }
+
+    expect($seen)->is('z=1;a=2;');
+}
+
+#[group: "unit"]
+test writes_through_the_cursor_reach_the_tree {
+    json::Value $doc = expect(json::parse('{"a":[1,2],"b":3}'))->ok();
+
+    foreach ($doc['a']->elements() as &$item) {
+        $item = 0;
+    }
+
+    foreach ($doc->members() as $key => &$item) {
+        if ($key == 'b') {
+            $item = 'x';
+        }
+    }
+
+    expect(json::dump($doc))->is('{"a":[0,0],"b":"x"}');
+}
+
+#[group: "unit"]
+test a_scalar_iterates_zero_times {
+    json::Value $n = json::int(1);
+    int32 $steps = 0;
+
+    foreach ($n->elements() as const &$item) {
+        $steps++;
+    }
+
+    foreach ($n->members() as const &$item) {
+        $steps++;
+    }
+
+    expect($steps)->is(0);
+}

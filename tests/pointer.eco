@@ -1,0 +1,159 @@
+/**
+ * pick into arrays, RFC 6901 JSON Pointer, flatten / unflatten.
+ */
+
+use ecotest::expect;
+
+/**
+ * The example document from RFC 6901 section 5.
+ */
+function rfcDoc() : json::Value
+{
+    return expect(json::parse('{"foo":["bar","baz"],"":0,"a/b":1,"c%d":2,"e^f":3,"g|h":4,"i\\\\j":5,"k\\"l":6," ":7,"m~n":8}'))->ok();
+}
+
+function at(const json::Value& $doc, const string& $pointer) : string
+{
+    json::Value $found = expect($doc->pick($pointer))->some();
+
+    return json::dump($found);
+}
+
+#[group: "unit"]
+test the_rfc_6901_examples {
+    json::Value $doc = rfcDoc();
+
+    expect(at($doc, ''))->is(json::dump($doc));
+    expect(at($doc, '/foo'))->is('["bar","baz"]');
+    expect(at($doc, '/foo/0'))->is('"bar"');
+    expect(at($doc, '/'))->is('0');
+    expect(at($doc, '/a~1b'))->is('1');
+    expect(at($doc, '/c%d'))->is('2');
+    expect(at($doc, '/e^f'))->is('3');
+    expect(at($doc, '/g|h'))->is('4');
+    expect(at($doc, '/i\\j'))->is('5');
+    expect(at($doc, '/k"l'))->is('6');
+    expect(at($doc, '/ '))->is('7');
+    expect(at($doc, '/m~0n'))->is('8');
+}
+
+#[group: "unit"]
+test a_pointer_that_finds_nothing {
+    json::Value $doc = rfcDoc();
+
+    expect($doc->pick('/nope'))->none();
+    expect($doc->pick('/foo/2'))->none(); // past the end
+    expect($doc->pick('/foo/-'))->none(); // the slot after the last
+    expect($doc->pick('/foo/01'))->none(); // a leading zero
+    expect($doc->pick('/foo/'))->none(); // an empty token is not an index
+    expect($doc->pick('/foo/1234567890123456789'))->none(); // too long to be an index
+    expect($doc->pick('/foo/0/x'))->none(); // through a scalar
+}
+
+#[group: "unit"]
+test a_malformed_pointer_finds_nothing {
+    json::Value $doc = rfcDoc();
+
+    expect($doc->pick('foo'))->none(); // no leading slash
+    expect($doc->pick('/m~'))->none(); // a tilde at the end
+    expect($doc->pick('/m~2n'))->none(); // a tilde before neither 0 nor 1
+}
+
+#[group: "unit"]
+test pick_with_a_list_steps_into_arrays {
+    json::Value $doc = expect(json::parse('{"users":[{"name":"ann"}],"0":"key"}'))->ok();
+
+    expect(expect($doc->pick(['users', '0', 'name']))->some()->asStr())->some('ann');
+    expect(expect($doc->pick(['0']))->some()->asStr())->some('key'); // an object reads "0" as a key
+    expect($doc->pick(['users', 'x']))->none();
+}
+
+#[group: "unit"]
+test flatten_names_every_leaf {
+    json::Value $doc = expect(json::parse('{"a":{"b":[1,{"c":null}]},"x/y":true,"e":[],"o":{}}'))->ok();
+
+    expect(json::dump($doc->flatten()))->is('{"/a/b/0":1,"/a/b/1/c":null,"/x~1y":true,"/e":[],"/o":{}}');
+    expect(json::dump(json::int(7)->flatten()))->is('{"":7}');
+}
+
+#[group: "unit"]
+test unflatten_is_the_inverse {
+    json::Value $doc = expect(json::parse('{"a":{"b":[1,{"c":null}]},"x/y":true,"m~n":[],"o":{},"":"root key"}'))->ok();
+    json::Value $back = expect($doc->flatten()->unflatten())->ok();
+
+    expect($back == $doc)->yes(says: 'flatten then unflatten gives the tree back');
+    expect(json::dump(expect(json::object()->unflatten())->ok()))->is('null');
+    expect(json::dump(expect(json::int(7)->flatten()->unflatten())->ok()))->is('7');
+}
+
+#[group: "unit"]
+test unflatten_fills_a_gap_with_null {
+    json::Value $flat = expect(json::parse('{"/a/2":1,"/a/0":0,"/b":true}'))->ok();
+
+    expect(json::dump(expect($flat->unflatten())->ok()))->is('{"a":[0,null,1],"b":true}');
+}
+
+#[group: "unit"]
+test unflatten_makes_an_array_only_of_indexes {
+    // one token that is not an index makes an object, wherever it sits among the others
+    json::Value $doc = expect(json::parse('{"a":{"0":1,"x":2},"b":{"x":1,"0":2},"c":{"01":1,"1":2}}'))->ok();
+    json::Value $back = expect($doc->flatten()->unflatten())->ok();
+
+    expect(json::dump($back))->is('{"a":{"0":1,"x":2},"b":{"x":1,"0":2},"c":{"01":1,"1":2}}');
+    json::Value $flat = expect(json::parse('{"/~0/1":1,"/~0/0":0}'))->ok();
+
+    expect(json::dump(expect($flat->unflatten())->ok()))->is('{"~":[0,1]}');
+}
+
+#[group: "unit"]
+test unflatten_does_not_depend_on_key_order {
+    // the deeper pointer is the one refused, whichever of the two comes first
+    expect(unflattenFails('{"/a":{},"/a/b":1}')->message())->is("'/a/b' runs through a value that cannot hold it");
+    expect(unflattenFails('{"/a/b":1,"/a":{}}')->message())->is("'/a/b' runs through a value that cannot hold it");
+    expect(unflattenFails('{"/n":null,"/n/x":1}')->message())->is("'/n/x' runs through a value that cannot hold it");
+    expect(unflattenFails('{"/n/x":1,"/n":null}')->message())->is("'/n/x' runs through a value that cannot hold it");
+    expect(unflattenFails('{"":{},"/x":1}')->message())->is("'/x' runs through a value that cannot hold it");
+}
+
+function unflattenFails(const string& $flat) : json::PointerError
+{
+    json::Value $v = expect(json::parse($flat))->ok();
+
+    return expect($v->unflatten())->fails();
+}
+
+#[group: "unit"]
+test unflatten_refuses_what_flatten_never_writes {
+    expect(json::int(1)->unflatten())->fails();
+
+    expect(unflattenFails('{"a":1}')->message())->is("'a' is not a JSON Pointer");
+    expect(unflattenFails('{"/a":[1]}')->message())->is("'/a' holds a non-empty array or object");
+    expect(unflattenFails('{"/a":1,"/a/b":2}')->message())->is("'/a/b' runs through a value that cannot hold it");
+    expect(unflattenFails('{"/a/99999999999":1}')->message())->is("'/a/99999999999' indexes past the number of members");
+    expect(unflattenFails('{"/a/0/1":1,"/a/1/5":2}')->message())->is("'/a/1/5' indexes past the number of members");
+}
+
+#[group: "unit"]
+test unflatten_caps_the_depth {
+    string $deep = '';
+    int32 $i = 0;
+
+    while ($i < 129) {
+        $deep->append('/a');
+        $i++;
+    }
+
+    json::Value $flat = json::object();
+    $flat[$deep] = 1;
+    json::PointerError $e = expect($flat->unflatten())->fails();
+
+    expect("{$e}")->starts("'/a/a/a");
+    expect($e->message())->is("'{$deep}' is nested too deep");
+}
+
+#[group: "unit"]
+test the_not_object_error_reads {
+    json::PointerError $e = expect(json::arr()->unflatten())->fails();
+
+    expect("{$e}")->is('only an object can be unflattened');
+}

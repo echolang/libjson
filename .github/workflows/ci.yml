@@ -24,9 +24,9 @@ jobs:
 
       - uses: echolang/setup-echo@v1
 
-      # the ecotest runner on every OS. coverage is not measured on Windows, so the line gate
-      # holds on the other two
+      # the ecotest runner on every OS. coverage is not measured on Windows, so the line and
+      # branch gates hold on the other two
       - name: Test
         run: |
           epm install
-          epm run ecotest --style simple ${{ runner.os != 'Windows' && '--coverage --min-coverage 100' || '' }}
+          epm run ecotest --style simple ${{ runner.os != 'Windows' && '--coverage --min-coverage 100 --min-branch-coverage 100' || '' }}

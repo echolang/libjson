@@ -1,0 +1,45 @@
+/**
+ * Echo containers into a `Value`.
+ *
+ * The `#[implicit]` rows on `Value` and `json::arr` / `json::object` all land here. Each element goes
+ * through the box's `push` / `set`, which take a `Value`, so the scalar conversions on `Value` do the
+ * per-element work and these loops stay one per container shape.
+ */
+
+namespace json;
+
+function listOf<T>(const array<T>& $vals) : Value
+{
+    Items $items = Items();
+
+    foreach ($vals as const &$val) {
+        $items->push($val);
+    }
+
+    return Value::list($items);
+}
+
+function objectOf<T>(const ordered_map<string, T>& $vals) : Value
+{
+    Fields $fields = Fields();
+
+    foreach ($vals as $key => const &$val) {
+        $fields->set($key, $val);
+    }
+
+    return Value::obj($fields);
+}
+
+function sortedObjectOf<T>(const map<string, T>& $vals) : Value
+{
+    array<string> $keys = $vals->keys();
+    Fields $fields = Fields();
+
+    $keys->sort();
+
+    foreach ($keys as const &$key) {
+        $fields->set($key, $vals->get($key));
+    }
+
+    return Value::obj($fields);
+}

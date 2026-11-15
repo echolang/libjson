@@ -362,7 +362,7 @@ struct Parser
         if ($isFloat) {
             // strtod reads every token the grammar above lets through, and none of them is NaN: an
             // overflow comes back as infinity, which is the only refusal left
-            float64 $n = guard str::float($token);
+            float64 $n = decimal($token);
 
             if (floatIsInf($n)) {
                 return .error(Error::tooBig($origin));

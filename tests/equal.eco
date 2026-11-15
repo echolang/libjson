@@ -1,0 +1,88 @@
+/**
+ * == and != over Value: deep, key order ignored, int and float by value.
+ */
+
+use ecotest::expect;
+
+#[group: "unit"]
+test equal_trees_compare_equal {
+    json::Value $a = expect(json::parse('{"a":1,"b":[true,null,"x"],"c":{}}'))->ok();
+    json::Value $b = expect(json::parse('{"a":1,"b":[true,null,"x"],"c":{}}'))->ok();
+
+    expect($a == $b)->yes(says: 'same content, different boxes');
+    expect($a != $b)->no(says: '!= is the negation');
+}
+
+#[group: "unit"]
+test object_key_order_does_not_matter {
+    json::Value $a = expect(json::parse('{"a":1,"b":2}'))->ok();
+    json::Value $b = expect(json::parse('{"b":2,"a":1}'))->ok();
+
+    expect($a == $b)->yes(says: 'objects compare as sets of members');
+}
+
+#[group: "unit"]
+test array_order_matters {
+    json::Value $a = expect(json::parse('[1,2]'))->ok();
+    json::Value $b = expect(json::parse('[2,1]'))->ok();
+
+    expect($a == $b)->no(says: 'arrays compare in order');
+}
+
+#[group: "unit"]
+test int_and_float_compare_by_value {
+    expect(json::int(1) == json::float(1.0))->yes(says: 'int left');
+    expect(json::float(1.0) == json::int(1))->yes(says: 'float left');
+    expect(json::float(1.5) == json::float(1.5))->yes(says: 'two floats');
+    expect(json::int(1) == json::float(1.5))->no(says: 'different numbers');
+    expect(json::int(1) == json::int(2))->no(says: 'payloads count, not just the kind');
+}
+
+#[group: "unit"]
+test compares_against_a_bare_scalar {
+    json::Value $obj = expect(json::parse('{"n":5,"s":"mario","ok":true}'))->ok();
+
+    expect($obj['n'] == 5)->yes(says: 'an int32 converts');
+    expect($obj['s'] == 'mario')->yes(says: 'a string converts');
+    expect($obj['ok'] == true)->yes(says: 'a bool converts');
+    expect($obj['n'] != 6)->yes(says: '!= converts too');
+}
+
+#[group: "unit"]
+test different_kinds_are_not_equal {
+    expect(json::nil() == json::nil())->yes(says: 'null is null');
+    expect(json::nil() == json::int(0))->no(says: 'null is not 0');
+    expect(json::bool(false) == json::bool(false))->yes(says: 'same bool');
+    expect(json::bool(false) == json::int(0))->no(says: 'false is not 0');
+    expect(json::int(0) == json::str('0'))->no(says: 'a number is not a string');
+    expect(json::str('a') == json::str('b'))->no(says: 'different text');
+    expect(json::str('a') == json::nil())->no(says: 'text is not null');
+    expect(json::arr() == json::object())->no(says: 'an array is not an object');
+    expect(json::object() == json::arr())->no(says: 'an object is not an array');
+}
+
+#[group: "unit"]
+test containers_of_different_size_or_content_differ {
+    json::Value $one = expect(json::parse('[1]'))->ok();
+    json::Value $two = expect(json::parse('[1,2]'))->ok();
+    json::Value $other = expect(json::parse('[9]'))->ok();
+
+    expect($one == $two)->no(says: 'array lengths differ');
+    expect($one == $other)->no(says: 'an element differs');
+
+    json::Value $a = expect(json::parse('{"a":1}'))->ok();
+    json::Value $ab = expect(json::parse('{"a":1,"b":2}'))->ok();
+    json::Value $b = expect(json::parse('{"b":1}'))->ok();
+    json::Value $a2 = expect(json::parse('{"a":2}'))->ok();
+
+    expect($a == $ab)->no(says: 'member counts differ');
+    expect($a == $b)->no(says: 'a key is missing on the right');
+    expect($a == $a2)->no(says: 'a member value differs');
+}
+
+#[group: "unit"]
+test a_missing_lookup_is_still_echo_null {
+    json::Value $obj = json::object();
+
+    expect($obj->get('x') == null)->yes(says: 'Echo null comparisons are unaffected');
+}

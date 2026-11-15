@@ -1,0 +1,63 @@
+/**
+ * `update`, `merge` and `extend`: one container into another.
+ *
+ * What comes in is cloned, so the source and the target never share a box afterwards. A wrong shape
+ * on either side is a `die`, the same as `[]=` on a non-object: a bug in the caller, not data.
+ */
+
+namespace json;
+
+function mergeInto(Fields $into, Fields $from, bool $deep) : void
+{
+    foreach ($from->keys() as const &$key) {
+        Value $incoming = $from->value($key);
+
+        if ($deep && $incoming->isObject()) {
+            Value $have = $into->get($key) ?? Value::nil();
+
+            if ($have->isObject()) {
+                $have->merge($incoming);
+
+                continue;
+            }
+        }
+
+        $into->set($key, $incoming->clone());
+    }
+}
+
+function extendInto(Items $into, Items $from) : void
+{
+    // counted up front, so `$a->extend($a)` doubles the array once rather than chasing its own tail
+    usize $n = $from->count();
+    usize $i = 0;
+
+    while ($i < $n) {
+        $into->push($from->value($i)->clone());
+        $i = $i + 1;
+    }
+}
+
+function fieldsOf(const Value& $v, const string& $verb) : Fields
+{
+    match ($v) {
+        Value::obj($fields) => {
+            return $fields;
+        },
+        else => {
+            die("json::Value: {$verb} needs two objects");
+        },
+    }
+}
+
+function itemsOf(const Value& $v, const string& $verb) : Items
+{
+    match ($v) {
+        Value::list($items) => {
+            return $items;
+        },
+        else => {
+            die("json::Value: {$verb} needs two arrays");
+        },
+    }
+}

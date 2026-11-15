@@ -1,0 +1,947 @@
+/**
+ * The MongoDB BSON corpus, the types `json::bson` reads.
+ *
+ * Generated from `source/bson-corpus/tests/*.json` in github.com/mongodb/specifications
+ * (Apache-2.0). A valid case parses, and dumps back to its canonical bytes. An int64 that fits
+ * in 32 bits comes back as an int32, so those cases compare the tree instead. A decode error is
+ * refused. decimal128 is not read yet, so its file is not here.
+ */
+
+#[group: "corpus"]
+test corpus_array_valid_empty {
+    corpusRoundTrips('0d000000046100050000000000');
+}
+
+#[group: "corpus"]
+test corpus_array_valid_single_element_array {
+    corpusRoundTrips('140000000461000c0000001030000a0000000000');
+}
+
+#[group: "corpus"]
+test corpus_array_valid_single_element_array_with_index_set_incorrectly_to_empty_string {
+    corpusRoundTrips('140000000461000c0000001030000a0000000000');
+    corpusDegenerate('130000000461000b00000010000a0000000000', '140000000461000c0000001030000a0000000000');
+}
+
+#[group: "corpus"]
+test corpus_array_valid_single_element_array_with_index_set_incorrectly_to_ab {
+    corpusRoundTrips('140000000461000c0000001030000a0000000000');
+    corpusDegenerate('150000000461000d000000106162000a0000000000', '140000000461000c0000001030000a0000000000');
+}
+
+#[group: "corpus"]
+test corpus_array_valid_multi_element_array_with_duplicate_indexes {
+    corpusRoundTrips('1b000000046100130000001030000a000000103100140000000000');
+    corpusDegenerate('1b000000046100130000001030000a000000103000140000000000', '1b000000046100130000001030000a000000103100140000000000');
+}
+
+#[group: "corpus"]
+test corpus_array_error_array_length_too_long_eats_outer_terminator {
+    corpusRefuses('140000000461000d0000001030000a0000000000');
+}
+
+#[group: "corpus"]
+test corpus_array_error_array_length_too_short_leaks_terminator {
+    corpusRefuses('140000000461000b0000001030000a0000000000');
+}
+
+#[group: "corpus"]
+test corpus_array_error_invalid_array_bad_string_length_in_field {
+    corpusRefuses('1a00000004666f6f00100000000230000500000062617a000000');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x00_zero_length {
+    corpusRoundTrips('0d000000057800000000000000');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x00_zero_length_keys_reversed {
+    corpusRoundTrips('0d000000057800000000000000');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x00 {
+    corpusRoundTrips('0f0000000578000200000000ffff00');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x01 {
+    corpusRoundTrips('0f0000000578000200000001ffff00');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x02 {
+    corpusRoundTrips('13000000057800060000000202000000ffff00');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x03 {
+    corpusRoundTrips('1d000000057800100000000373ffd26444b34c6990e8e7d1dfc035d400');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x04 {
+    corpusRoundTrips('1d000000057800100000000473ffd26444b34c6990e8e7d1dfc035d400');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x04_uuid {
+    corpusRoundTrips('1d000000057800100000000473ffd26444b34c6990e8e7d1dfc035d400');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x05 {
+    corpusRoundTrips('1d000000057800100000000573ffd26444b34c6990e8e7d1dfc035d400');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x07 {
+    corpusRoundTrips('1d000000057800100000000773ffd26444b34c6990e8e7d1dfc035d400');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x08 {
+    corpusRoundTrips('1d000000057800100000000873ffd26444b34c6990e8e7d1dfc035d400');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x80 {
+    corpusRoundTrips('0f0000000578000200000080ffff00');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_type_query_operator_conflicts_with_legacy_binary_form_with_type_field {
+    corpusRoundTrips('1f000000037800170000000224747970650007000000737472696e67000000');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_type_query_operator_conflicts_with_legacy_binary_form_with_type_field_2 {
+    corpusRoundTrips('180000000378001000000010247479706500020000000000');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x09_vector_float32 {
+    corpusRoundTrips('170000000578000a0000000927000000fe420000e04000');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x09_vector_int8 {
+    corpusRoundTrips('11000000057800040000000903007f0700');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x09_vector_packed_bit {
+    corpusRoundTrips('11000000057800040000000910007f0700');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x09_vector_zero_length_float32 {
+    corpusRoundTrips('0f0000000578000200000009270000');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x09_vector_zero_length_int8 {
+    corpusRoundTrips('0f0000000578000200000009030000');
+}
+
+#[group: "corpus"]
+test corpus_binary_valid_subtype_0x09_vector_zero_length_packed_bit {
+    corpusRoundTrips('0f0000000578000200000009100000');
+}
+
+#[group: "corpus"]
+test corpus_binary_error_length_longer_than_document {
+    corpusRefuses('1d000000057800ff0000000573ffd26444b34c6990e8e7d1dfc035d400');
+}
+
+#[group: "corpus"]
+test corpus_binary_error_negative_length {
+    corpusRefuses('0d000000057800ffffffff0000');
+}
+
+#[group: "corpus"]
+test corpus_binary_error_subtype_0x02_length_too_long {
+    corpusRefuses('13000000057800060000000203000000ffff00');
+}
+
+#[group: "corpus"]
+test corpus_binary_error_subtype_0x02_length_too_short {
+    corpusRefuses('13000000057800060000000201000000ffff00');
+}
+
+#[group: "corpus"]
+test corpus_binary_error_subtype_0x02_length_negative_one {
+    corpusRefuses('130000000578000600000002ffffffffffff00');
+}
+
+#[group: "corpus"]
+test corpus_boolean_valid_true {
+    corpusRoundTrips('090000000862000100');
+}
+
+#[group: "corpus"]
+test corpus_boolean_valid_false {
+    corpusRoundTrips('090000000862000000');
+}
+
+#[group: "corpus"]
+test corpus_boolean_error_invalid_boolean_value_of_2 {
+    corpusRefuses('090000000862000200');
+}
+
+#[group: "corpus"]
+test corpus_boolean_error_invalid_boolean_value_of_1 {
+    corpusRefuses('09000000086200ff00');
+}
+
+#[group: "corpus"]
+test corpus_code_valid_empty_string {
+    corpusRoundTrips('0d0000000d6100010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_valid_single_character {
+    corpusRoundTrips('0e0000000d610002000000620000');
+}
+
+#[group: "corpus"]
+test corpus_code_valid_multi_character {
+    corpusRoundTrips('190000000d61000d0000006162616261626162616261620000');
+}
+
+#[group: "corpus"]
+test corpus_code_valid_two_byte_utf_8 {
+    corpusRoundTrips('190000000d61000d000000c3a9c3a9c3a9c3a9c3a9c3a90000');
+}
+
+#[group: "corpus"]
+test corpus_code_valid_three_byte_utf_8 {
+    corpusRoundTrips('190000000d61000d000000e29886e29886e29886e298860000');
+}
+
+#[group: "corpus"]
+test corpus_code_valid_embedded_nulls {
+    corpusRoundTrips('190000000d61000d0000006162006261620062616261620000');
+}
+
+#[group: "corpus"]
+test corpus_code_error_bad_code_string_length_0_but_no_0x00_either {
+    corpusRefuses('0c0000000d61000000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_error_bad_code_string_length_1 {
+    corpusRefuses('0c0000000d6100ffffffff00');
+}
+
+#[group: "corpus"]
+test corpus_code_error_bad_code_string_length_eats_terminator {
+    corpusRefuses('100000000d6100050000006200620000');
+}
+
+#[group: "corpus"]
+test corpus_code_error_bad_code_string_length_longer_than_rest_of_document {
+    corpusRefuses('120000000d00ffffff00666f6f6261720000');
+}
+
+#[group: "corpus"]
+test corpus_code_error_code_string_is_not_null_terminated {
+    corpusRefuses('100000000d610004000000616263ff00');
+}
+
+#[group: "corpus"]
+test corpus_code_error_empty_code_string_but_extra_null {
+    corpusRefuses('0e0000000d610001000000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_error_invalid_utf_8 {
+    corpusRefuses('0e0000000d610002000000e90000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_valid_empty_code_string_empty_scope {
+    corpusRoundTrips('160000000f61000e0000000100000000050000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_valid_non_empty_code_string_empty_scope {
+    corpusRoundTrips('1a0000000f610012000000050000006162636400050000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_valid_empty_code_string_non_empty_scope {
+    corpusRoundTrips('1d0000000f61001500000001000000000c000000107800010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_valid_non_empty_code_string_and_non_empty_scope {
+    corpusRoundTrips('210000000f6100190000000500000061626364000c000000107800010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_valid_unicode_and_embedded_null_in_code_string_empty_scope {
+    corpusRoundTrips('1a0000000f61001200000005000000c3a9006400050000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_field_length_zero {
+    corpusRefuses('280000000f6100000000000500000061626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_field_length_negative {
+    corpusRefuses('280000000f6100ffffffff0500000061626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_field_length_too_short_less_than_minimum_size {
+    corpusRefuses('160000000f61000d0000000100000000050000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_field_length_too_short_truncates_scope {
+    corpusRefuses('280000000f61001f0000000500000061626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_field_length_too_long_clips_outer_doc {
+    corpusRefuses('280000000f6100210000000500000061626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_field_length_too_long_longer_than_outer_doc {
+    corpusRefuses('280000000f6100ff0000000500000061626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_bad_code_string_length_too_short {
+    corpusRefuses('280000000f6100200000000400000061626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_bad_code_string_length_too_long_clips_scope {
+    corpusRefuses('280000000f6100200000000600000061626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_bad_code_string_negative_length {
+    corpusRefuses('280000000f610020000000ffffffff61626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_bad_code_string_length_longer_than_field {
+    corpusRefuses('280000000f610020000000ff00000061626364001300000010780001000000107900010000000000');
+}
+
+#[group: "corpus"]
+test corpus_code_w_scope_error_bad_scope_doc_field_has_bad_string_length {
+    corpusRefuses('1c0000000f001500000001000000000c000000020000000000000000');
+}
+
+#[group: "corpus"]
+test corpus_datetime_valid_epoch {
+    corpusRoundTrips('10000000096100000000000000000000');
+}
+
+#[group: "corpus"]
+test corpus_datetime_valid_positive_ms {
+    corpusRoundTrips('10000000096100c5d8d6cc3b01000000');
+}
+
+#[group: "corpus"]
+test corpus_datetime_valid_negative {
+    corpusRoundTrips('10000000096100c33ce7b9bdffffff00');
+}
+
+#[group: "corpus"]
+test corpus_datetime_valid_y10k {
+    corpusRoundTrips('1000000009610000dc1fd277e6000000');
+}
+
+#[group: "corpus"]
+test corpus_datetime_valid_leading_zero_ms {
+    corpusRoundTrips('10000000096100d1d6d6cc3b01000000');
+}
+
+#[group: "corpus"]
+test corpus_datetime_error_datetime_field_truncated {
+    corpusRefuses('0c0000000961001234567800');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_valid_dbpointer {
+    corpusRoundTrips('1a0000000c610002000000620056e1fc72e0c917e9c471416100');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_valid_dbpointer_with_opposite_key_order {
+    corpusRoundTrips('1a0000000c610002000000620056e1fc72e0c917e9c471416100');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_valid_with_two_byte_utf_8 {
+    corpusRoundTrips('1b0000000c610003000000c3a90056e1fc72e0c917e9c471416100');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_error_string_with_negative_length {
+    corpusRefuses('1a0000000c6100ffffffff620056e1fc72e0c917e9c471416100');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_error_string_with_zero_length {
+    corpusRefuses('1a0000000c610000000000620056e1fc72e0c917e9c471416100');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_error_string_not_null_terminated {
+    corpusRefuses('1a0000000c610002000000626256e1fc72e0c917e9c471416100');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_error_short_oid_less_than_minimum_length_for_field {
+    corpusRefuses('160000000c61000300000061620056e1fc72e0c91700');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_error_short_oid_greater_than_minimum_but_truncated {
+    corpusRefuses('1a0000000c61000300000061620056e1fc72e0c917e9c4716100');
+}
+
+#[group: "corpus"]
+test corpus_dbpointer_error_string_with_bad_utf_8 {
+    corpusRefuses('1a0000000c610002000000e90056e1fc72e0c917e9c471416100');
+}
+
+#[group: "corpus"]
+test corpus_document_valid_empty_subdoc {
+    corpusRoundTrips('0d000000037800050000000000');
+}
+
+#[group: "corpus"]
+test corpus_document_valid_empty_string_key_subdoc {
+    corpusRoundTrips('150000000378000d00000002000200000062000000');
+}
+
+#[group: "corpus"]
+test corpus_document_valid_single_character_key_subdoc {
+    corpusRoundTrips('160000000378000e0000000261000200000062000000');
+}
+
+#[group: "corpus"]
+test corpus_document_valid_dollar_prefixed_key_in_sub_document {
+    corpusRoundTrips('170000000378000f000000022461000200000062000000');
+}
+
+#[group: "corpus"]
+test corpus_document_valid_dollar_as_key_in_sub_document {
+    corpusRoundTrips('160000000378000e0000000224000200000061000000');
+}
+
+#[group: "corpus"]
+test corpus_document_valid_dotted_key_in_sub_document {
+    corpusRoundTrips('180000000378001000000002612e62000200000063000000');
+}
+
+#[group: "corpus"]
+test corpus_document_valid_dot_as_key_in_sub_document {
+    corpusRoundTrips('160000000378000e000000022e000200000061000000');
+}
+
+#[group: "corpus"]
+test corpus_document_error_subdocument_length_too_long_eats_outer_terminator {
+    corpusRefuses('1800000003666f6f000f0000001062617200ffffff7f0000');
+}
+
+#[group: "corpus"]
+test corpus_document_error_subdocument_length_too_short_leaks_terminator {
+    corpusRefuses('1500000003666f6f000a0000000862617200010000');
+}
+
+#[group: "corpus"]
+test corpus_document_error_invalid_subdocument_bad_string_length_in_field {
+    corpusRefuses('1c00000003666f6f001200000002626172000500000062617a000000');
+}
+
+#[group: "corpus"]
+test corpus_document_error_null_byte_in_sub_document_key {
+    corpusRefuses('150000000378000d00000010610000010000000000');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_1_0 {
+    corpusRoundTrips('10000000016400000000000000f03f00');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_1_0_2 {
+    corpusRoundTrips('10000000016400000000000000f0bf00');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_1_0001220703125 {
+    corpusRoundTrips('10000000016400000000008000f03f00');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_1_0001220703125_2 {
+    corpusRoundTrips('10000000016400000000008000f0bf00');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_1_2345678921232e_18 {
+    corpusRoundTrips('100000000164002a1bf5f41022b14300');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_1_2345678921232e_18_2 {
+    corpusRoundTrips('100000000164002a1bf5f41022b1c300');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_0_0 {
+    corpusRoundTrips('10000000016400000000000000000000');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_0_0_2 {
+    corpusRoundTrips('10000000016400000000000000008000');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_nan {
+    corpusParses('10000000016400000000000000f87f00');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_nan_with_payload {
+    corpusParses('10000000016400120000000000f87f00');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_inf {
+    corpusRoundTrips('10000000016400000000000000f07f00');
+}
+
+#[group: "corpus"]
+test corpus_double_valid_inf_2 {
+    corpusRoundTrips('10000000016400000000000000f0ff00');
+}
+
+#[group: "corpus"]
+test corpus_double_error_double_truncated {
+    corpusRefuses('0b0000000164000000f03f00');
+}
+
+#[group: "corpus"]
+test corpus_int32_valid_minvalue {
+    corpusRoundTrips('0c0000001069000000008000');
+}
+
+#[group: "corpus"]
+test corpus_int32_valid_maxvalue {
+    corpusRoundTrips('0c000000106900ffffff7f00');
+}
+
+#[group: "corpus"]
+test corpus_int32_valid_1 {
+    corpusRoundTrips('0c000000106900ffffffff00');
+}
+
+#[group: "corpus"]
+test corpus_int32_valid_0 {
+    corpusRoundTrips('0c0000001069000000000000');
+}
+
+#[group: "corpus"]
+test corpus_int32_valid_1_2 {
+    corpusRoundTrips('0c0000001069000100000000');
+}
+
+#[group: "corpus"]
+test corpus_int32_error_bad_int32_field_length {
+    corpusRefuses('090000001061000500');
+}
+
+#[group: "corpus"]
+test corpus_int64_valid_minvalue {
+    corpusReads('10000000126100000000000000008000', '{"a":-9223372036854775808}');
+}
+
+#[group: "corpus"]
+test corpus_int64_valid_maxvalue {
+    corpusReads('10000000126100ffffffffffffff7f00', '{"a":9223372036854775807}');
+}
+
+#[group: "corpus"]
+test corpus_int64_valid_1 {
+    corpusReads('10000000126100ffffffffffffffff00', '{"a":-1}');
+}
+
+#[group: "corpus"]
+test corpus_int64_valid_0 {
+    corpusReads('10000000126100000000000000000000', '{"a":0}');
+}
+
+#[group: "corpus"]
+test corpus_int64_valid_1_2 {
+    corpusReads('10000000126100010000000000000000', '{"a":1}');
+}
+
+#[group: "corpus"]
+test corpus_int64_error_int64_field_truncated {
+    corpusRefuses('0c0000001261001234567800');
+}
+
+#[group: "corpus"]
+test corpus_maxkey_valid_maxkey {
+    corpusRoundTrips('080000007f610000');
+}
+
+#[group: "corpus"]
+test corpus_minkey_valid_minkey {
+    corpusRoundTrips('08000000ff610000');
+}
+
+#[group: "corpus"]
+test corpus_null_valid_null {
+    corpusRoundTrips('080000000a610000');
+}
+
+#[group: "corpus"]
+test corpus_oid_valid_all_zeroes {
+    corpusRoundTrips('1400000007610000000000000000000000000000');
+}
+
+#[group: "corpus"]
+test corpus_oid_valid_all_ones {
+    corpusRoundTrips('14000000076100ffffffffffffffffffffffff00');
+}
+
+#[group: "corpus"]
+test corpus_oid_valid_random {
+    corpusRoundTrips('1400000007610056e1fc72e0c917e9c471416100');
+}
+
+#[group: "corpus"]
+test corpus_oid_error_oid_truncated {
+    corpusRefuses('1200000007610056e1fc72e0c917e9c471');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_empty_regex_with_no_options {
+    corpusRoundTrips('0a0000000b6100000000');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_regex_without_options {
+    corpusRoundTrips('0d0000000b6100616263000000');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_regex_with_options {
+    corpusRoundTrips('0f0000000b610061626300696d0000');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_regex_with_options_keys_reversed {
+    corpusRoundTrips('0f0000000b610061626300696d0000');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_regex_with_slash {
+    corpusRoundTrips('110000000b610061622f636400696d0000');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_flags_not_alphabetized {
+    corpusRoundTrips('100000000b610061626300696d780000');
+    corpusDegenerate('100000000b6100616263006d69780000', '100000000b610061626300696d780000');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_required_escapes {
+    corpusRoundTrips('100000000b610061625c226162000000');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_regular_expression_as_value_of_regex_query_operator {
+    corpusRoundTrips('180000000b247265676578007061747465726e0069780000');
+}
+
+#[group: "corpus"]
+test corpus_regex_valid_regular_expression_as_value_of_regex_query_operator_with_options {
+    corpusRoundTrips('270000000b247265676578007061747465726e000002246f7074696f6e73000300000069780000');
+}
+
+#[group: "corpus"]
+test corpus_regex_error_null_byte_in_pattern_string {
+    corpusRefuses('0f0000000b610061006300696d0000');
+}
+
+#[group: "corpus"]
+test corpus_regex_error_null_byte_in_flags_string {
+    corpusRefuses('100000000b61006162630069006d0000');
+}
+
+#[group: "corpus"]
+test corpus_string_valid_empty_string {
+    corpusRoundTrips('0d000000026100010000000000');
+}
+
+#[group: "corpus"]
+test corpus_string_valid_single_character {
+    corpusRoundTrips('0e00000002610002000000620000');
+}
+
+#[group: "corpus"]
+test corpus_string_valid_multi_character {
+    corpusRoundTrips('190000000261000d0000006162616261626162616261620000');
+}
+
+#[group: "corpus"]
+test corpus_string_valid_two_byte_utf_8 {
+    corpusRoundTrips('190000000261000d000000c3a9c3a9c3a9c3a9c3a9c3a90000');
+}
+
+#[group: "corpus"]
+test corpus_string_valid_three_byte_utf_8 {
+    corpusRoundTrips('190000000261000d000000e29886e29886e29886e298860000');
+}
+
+#[group: "corpus"]
+test corpus_string_valid_embedded_nulls {
+    corpusRoundTrips('190000000261000d0000006162006261620062616261620000');
+}
+
+#[group: "corpus"]
+test corpus_string_valid_required_escapes {
+    corpusRoundTrips('320000000261002600000061625c220102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f61620000');
+}
+
+#[group: "corpus"]
+test corpus_string_error_bad_string_length_0_but_no_0x00_either {
+    corpusRefuses('0c0000000261000000000000');
+}
+
+#[group: "corpus"]
+test corpus_string_error_bad_string_length_1 {
+    corpusRefuses('0c000000026100ffffffff00');
+}
+
+#[group: "corpus"]
+test corpus_string_error_bad_string_length_eats_terminator {
+    corpusRefuses('10000000026100050000006200620000');
+}
+
+#[group: "corpus"]
+test corpus_string_error_bad_string_length_longer_than_rest_of_document {
+    corpusRefuses('120000000200ffffff00666f6f6261720000');
+}
+
+#[group: "corpus"]
+test corpus_string_error_string_is_not_null_terminated {
+    corpusRefuses('1000000002610004000000616263ff00');
+}
+
+#[group: "corpus"]
+test corpus_string_error_empty_string_but_extra_null {
+    corpusRefuses('0e00000002610001000000000000');
+}
+
+#[group: "corpus"]
+test corpus_string_error_invalid_utf_8 {
+    corpusRefuses('0e00000002610002000000e90000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_valid_empty_string {
+    corpusRoundTrips('0d0000000e6100010000000000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_valid_single_character {
+    corpusRoundTrips('0e0000000e610002000000620000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_valid_multi_character {
+    corpusRoundTrips('190000000e61000d0000006162616261626162616261620000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_valid_two_byte_utf_8 {
+    corpusRoundTrips('190000000e61000d000000c3a9c3a9c3a9c3a9c3a9c3a90000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_valid_three_byte_utf_8 {
+    corpusRoundTrips('190000000e61000d000000e29886e29886e29886e298860000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_valid_embedded_nulls {
+    corpusRoundTrips('190000000e61000d0000006162006261620062616261620000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_error_bad_symbol_length_0_but_no_0x00_either {
+    corpusRefuses('0c0000000e61000000000000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_error_bad_symbol_length_1 {
+    corpusRefuses('0c0000000e6100ffffffff00');
+}
+
+#[group: "corpus"]
+test corpus_symbol_error_bad_symbol_length_eats_terminator {
+    corpusRefuses('100000000e6100050000006200620000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_error_bad_symbol_length_longer_than_rest_of_document {
+    corpusRefuses('120000000e00ffffff00666f6f6261720000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_error_symbol_is_not_null_terminated {
+    corpusRefuses('100000000e610004000000616263ff00');
+}
+
+#[group: "corpus"]
+test corpus_symbol_error_empty_symbol_but_extra_null {
+    corpusRefuses('0e0000000e610001000000000000');
+}
+
+#[group: "corpus"]
+test corpus_symbol_error_invalid_utf_8 {
+    corpusRefuses('0e0000000e610002000000e90000');
+}
+
+#[group: "corpus"]
+test corpus_timestamp_valid_timestamp_123456789_42 {
+    corpusRoundTrips('100000001161002a00000015cd5b0700');
+}
+
+#[group: "corpus"]
+test corpus_timestamp_valid_timestamp_123456789_42_keys_reversed {
+    corpusRoundTrips('100000001161002a00000015cd5b0700');
+}
+
+#[group: "corpus"]
+test corpus_timestamp_valid_timestamp_with_high_order_bit_set_on_both_seconds_and_increment {
+    corpusRoundTrips('10000000116100ffffffffffffffff00');
+}
+
+#[group: "corpus"]
+test corpus_timestamp_valid_timestamp_with_high_order_bit_set_on_both_seconds_and_increment_not_uint32_max {
+    corpusRoundTrips('1000000011610000286bee00286bee00');
+}
+
+#[group: "corpus"]
+test corpus_timestamp_error_truncated_timestamp_field {
+    corpusRefuses('0f0000001161002a00000015cd5b00');
+}
+
+#[group: "corpus"]
+test corpus_top_valid_dollar_prefixed_key_in_top_level_document {
+    corpusRoundTrips('0f00000010246b6579002a00000000');
+}
+
+#[group: "corpus"]
+test corpus_top_valid_dollar_as_key_in_top_level_document {
+    corpusRoundTrips('0e00000002240002000000610000');
+}
+
+#[group: "corpus"]
+test corpus_top_valid_dotted_key_in_top_level_document {
+    corpusRoundTrips('1000000002612e620002000000630000');
+}
+
+#[group: "corpus"]
+test corpus_top_valid_dot_as_key_in_top_level_document {
+    corpusRoundTrips('0e000000022e0002000000610000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_an_object_size_that_s_too_small_to_even_include_the_object_size_but_is_a_well_formed_empty_object {
+    corpusRefuses('0100000000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_an_object_size_that_s_only_enough_for_the_object_size_but_is_a_well_formed_empty_object {
+    corpusRefuses('0400000000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_one_object_with_length_shorter_than_size_missing_eoo {
+    corpusRefuses('05000000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_one_object_sized_correctly_with_a_spot_for_an_eoo_but_the_eoo_is_0x01 {
+    corpusRefuses('0500000001');
+}
+
+#[group: "corpus"]
+test corpus_top_error_one_object_sized_correctly_with_a_spot_for_an_eoo_but_the_eoo_is_0xff {
+    corpusRefuses('05000000ff');
+}
+
+#[group: "corpus"]
+test corpus_top_error_one_object_sized_correctly_with_a_spot_for_an_eoo_but_the_eoo_is_0x70 {
+    corpusRefuses('0500000070');
+}
+
+#[group: "corpus"]
+test corpus_top_error_byte_count_is_zero_with_non_zero_input_length {
+    corpusRefuses('00000000000000000000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_stated_length_exceeds_byte_count_with_truncated_document {
+    corpusRefuses('1200000002666f6f0004000000626172');
+}
+
+#[group: "corpus"]
+test corpus_top_error_stated_length_less_than_byte_count_with_garbage_after_envelope {
+    corpusRefuses('1200000002666f6f00040000006261720000deadbeef');
+}
+
+#[group: "corpus"]
+test corpus_top_error_stated_length_exceeds_byte_count_with_valid_envelope {
+    corpusRefuses('1300000002666f6f00040000006261720000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_stated_length_less_than_byte_count_with_valid_envelope {
+    corpusRefuses('1100000002666f6f00040000006261720000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_invalid_bson_type_low_range {
+    corpusRefuses('07000000000000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_invalid_bson_type_high_range {
+    corpusRefuses('07000000800000');
+}
+
+#[group: "corpus"]
+test corpus_top_error_document_truncated_mid_key {
+    corpusRefuses('1200000002666f');
+}
+
+#[group: "corpus"]
+test corpus_top_error_null_byte_in_document_key {
+    corpusRefuses('0d000000107800000100000000');
+}
+
+#[group: "corpus"]
+test corpus_undefined_valid_undefined {
+    corpusRoundTrips('0800000006610000');
+}

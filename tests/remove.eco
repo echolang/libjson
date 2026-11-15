@@ -1,0 +1,56 @@
+/**
+ * remove / removeAt / clear / keys.
+ */
+
+use ecotest::expect;
+
+#[group: "unit"]
+test remove_takes_a_member_out {
+    json::Value $obj = expect(json::parse('{"a":1,"b":2,"c":3}'))->ok();
+
+    expect($obj->remove('b'))->yes(says: 'b was there');
+    expect($obj->remove('b'))->no(says: 'b is gone now');
+    expect(json::dump($obj))->is('{"a":1,"c":3}');
+}
+
+#[group: "unit"]
+test remove_at_shifts_the_rest_down {
+    json::Value $arr = expect(json::parse('[1,2,3]'))->ok();
+
+    expect($arr->removeAt(0))->yes(says: 'index 0 was there');
+    expect($arr->removeAt(2))->no(says: 'past the end');
+    expect(json::dump($arr))->is('[2,3]');
+}
+
+#[group: "unit"]
+test remove_on_the_wrong_kind_is_false {
+    json::Value $arr = json::arr();
+    json::Value $obj = json::object();
+
+    expect($arr->remove('a'))->no(says: 'an array has no keys');
+    expect($obj->removeAt(0))->no(says: 'an object has no indices');
+}
+
+#[group: "unit"]
+test clear_empties_the_shared_box {
+    json::Value $obj = expect(json::parse('{"a":1}'))->ok();
+    json::Value $alias = $obj;
+    json::Value $arr = expect(json::parse('[1,2]'))->ok();
+    json::Value $n = json::int(4);
+
+    $obj->clear();
+    $arr->clear();
+    $n->clear();
+
+    expect(json::dump($alias))->is('{}');
+    expect(json::dump($arr))->is('[]');
+    expect(json::dump($n))->is('4');
+}
+
+#[group: "unit"]
+test keys_in_order {
+    json::Value $obj = expect(json::parse('{"z":1,"a":2}'))->ok();
+
+    expect($obj->keys())->is(['z', 'a']);
+    expect(json::int(1)->keys())->empty();
+}

@@ -1,0 +1,141 @@
+/**
+ * Base64, the standard alphabet with `=` padding, for BSON binary in Extended JSON.
+ *
+ * Decoding is strict: a length that is not a multiple of four, a byte outside the alphabet,
+ * padding anywhere but the last one or two places, or a last digit with bits the bytes do not use
+ * is `null`. The writer reads that as "not a `$binary` wrapper" and writes the object as it is. So
+ * every text it takes is the one `base64Encode` writes back, and a read after a write agrees.
+ */
+
+namespace json;
+
+private const string B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function base64Encode(const string& $data) : string
+{
+    string $out = '';
+    usize $n = $data->size();
+    usize $whole = $n - $n % 3;
+    usize $i = 0;
+
+    $out->reserve((($n + 2) / 3) * 4);
+
+    while ($i < $whole) {
+        uint32 $group = (($data->byte($i) as uint32) << 16) | (($data->byte($i + 1) as uint32) << 8) | ($data->byte($i + 2) as uint32);
+
+        $out->push(B64->byte(($group >> 18) & 63));
+        $out->push(B64->byte(($group >> 12) & 63));
+        $out->push(B64->byte(($group >> 6) & 63));
+        $out->push(B64->byte($group & 63));
+        $i = $i + 3;
+    }
+
+    if ($whole == $n) {
+        return $out;
+    }
+
+    // one or two bytes left: two or three digits, padded to four
+    bool $two = $n - $whole == 2;
+    uint32 $group = ($data->byte($i) as uint32) << 16;
+
+    if ($two) {
+        $group = $group | (($data->byte($i + 1) as uint32) << 8);
+    }
+
+    $out->push(B64->byte(($group >> 18) & 63));
+    $out->push(B64->byte(($group >> 12) & 63));
+
+    if ($two) {
+        $out->push(B64->byte(($group >> 6) & 63));
+    }
+    else {
+        $out->push(CH_EQUALS);
+    }
+
+    $out->push(CH_EQUALS);
+
+    return $out;
+}
+
+function base64Decode(const string& $text) : string?
+{
+    usize $n = $text->size();
+
+    if ($n % 4 != 0) {
+        return null;
+    }
+
+    // padding is only ever the last one or two bytes; a `=` anywhere else fails as a digit below
+    usize $digits = $n;
+
+    if ($n > 0 && $text->byte($n - 1) == CH_EQUALS) {
+        $digits = $n - 1;
+
+        if ($text->byte($n - 2) == CH_EQUALS) {
+            $digits = $n - 2;
+        }
+    }
+
+    string $out = '';
+    uint32 $acc = 0;
+    uint32 $bits = 0;
+    usize $i = 0;
+
+    $out->reserve($n / 4 * 3);
+
+    while ($i < $digits) {
+        int32 $d = base64Digit($text->byte($i));
+
+        if ($d < 0) {
+            return null;
+        }
+
+        $acc = ($acc << 6) | ($d as uint32);
+        $bits = $bits + 6;
+
+        if ($bits >= 8) {
+            $bits = $bits - 8;
+            $out->push((($acc >> $bits) & 255) as uint8);
+        }
+
+        $i = $i + 1;
+    }
+
+    // `QR==` would decode to the same byte as `QQ==`; only the spelling with the spare bits clear is
+    // base64 of it
+    if (($acc & ((1 << $bits) - 1)) != 0) {
+        return null;
+    }
+
+    return $out;
+}
+
+/**
+ * The six-bit value of one base64 byte, or `-1`.
+ */
+function base64Digit(uint8 $b) : int32
+{
+    int32 $wide = $b;
+
+    if ($b >= CH_UPPER_A && $b <= CH_UPPER_Z) {
+        return $wide - CH_UPPER_A;
+    }
+
+    if ($b >= CH_LOWER_A && $b <= CH_LOWER_Z) {
+        return $wide - CH_LOWER_A + 26;
+    }
+
+    if ($b >= CH_ZERO && $b <= CH_NINE) {
+        return $wide - CH_ZERO + 52;
+    }
+
+    if ($b == CH_PLUS) {
+        return 62;
+    }
+
+    if ($b == CH_SLASH) {
+        return 63;
+    }
+
+    return -1;
+}

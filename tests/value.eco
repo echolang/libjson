@@ -56,6 +56,9 @@ test extractors_refuse_the_wrong_kind {
     expect($s->asArray())->none();
     expect($s->asObject())->none();
     expect($s->isNumber())->no(says: 'a string is not a number');
+    expect($s->isInt())->no(says: 'a string is not an int');
+    expect($s->isFloat())->no(says: 'a string is not a float');
+    expect(json::int(1)->isStr())->no(says: 'an int is not a string');
     expect($s->count())->is(0);
 }
 

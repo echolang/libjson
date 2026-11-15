@@ -1,0 +1,520 @@
+/**
+ * `json::parse<bson>` - one document from BSON bytes.
+ *
+ * Every document is length-prefixed, so each read is checked twice: against the end of the input
+ * (past it is `.unterminated`, the bytes were cut short) and against the end of the document it
+ * sits in (past that is `.unexpected`, the lengths disagree). The `Place` of an error is line 1,
+ * the column one past the byte offset.
+ *
+ * The nesting cap is `MAX_DEPTH`, the same 128 the text parser keeps, counting the root.
+ */
+
+namespace json;
+
+struct BsonReader
+{
+    string $src;
+    usize $i;
+    int32 $depth;
+
+    // where the document being read ends; a read past it is `.unexpected`
+    usize $end;
+
+    constructor(const string& $src)
+    {
+        $this->src = $src;
+        $this->i = 0;
+        $this->depth = 0;
+        $this->end = $src->size();
+    }
+
+    function run() : result<Value, Error>
+    {
+        if ($this->src->empty()) {
+            return .error(Error::empty($this->here()));
+        }
+
+        Value $v = try $this->document(false);
+
+        if ($this->i < $this->src->size()) {
+            return .error(Error::trailing($this->here()));
+        }
+
+        return .ok($v);
+    }
+
+    /**
+     * The document at the cursor, as an object or, for `$array`, as an array whose keys are not
+     * looked at. It has to end inside the enclosing document.
+     */
+    function document(bool $array) : result<Value, Error>
+    {
+        if ($this->depth >= MAX_DEPTH) {
+            return .error(Error::tooDeep($this->here()));
+        }
+
+        usize $start = $this->i;
+        int32 $len = try $this->int32();
+
+        if ($len < 5) {
+            return .error(Error::unexpected(bsonPlace($start)));
+        }
+
+        usize $end = $start + ($len as usize);
+
+        try $this->within($end, $start);
+
+        usize $outer = $this->end;
+
+        $this->end = $end;
+        $this->depth = $this->depth + 1;
+
+        Items $items = Items();
+        Fields $fields = Fields();
+
+        while (true) {
+            // the length promised a terminator before $end, so running out of room is a bad length
+            if ($this->i >= $end) {
+                return .error(Error::unexpected($this->here()));
+            }
+
+            usize $at = $this->i;
+            uint8 $tag = $this->src->byte($at);
+
+            $this->i = $this->i + 1;
+
+            if ($tag == BSON_END) {
+                if ($this->i != $end) {
+                    return .error(Error::unexpected(bsonPlace($at)));
+                }
+
+                break;
+            }
+
+            string $key = try $this->cstring();
+
+            Value $v = try $this->element($tag, $at);
+
+            if ($array) {
+                $items->push($v);
+            }
+            else {
+                $fields->set($key, $v);
+            }
+        }
+
+        $this->depth = $this->depth - 1;
+        $this->end = $outer;
+
+        if ($array) {
+            return .ok(Value::list($items));
+        }
+
+        return .ok(Value::obj($fields));
+    }
+
+    /**
+     * The value after an element's key. `$at` is where its tag byte sat, for the error that
+     * refuses the tag itself.
+     */
+    function element(uint8 $tag, usize $at) : result<Value, Error>
+    {
+        if ($tag == BSON_DOUBLE) {
+            uint64 $bits = try $this->uint64();
+
+            return .ok(bsonDouble(mem::bit_cast<float64, uint64>($bits)));
+        }
+
+        if ($tag == BSON_STRING) {
+            string $s = try $this->string();
+
+            return .ok(Value::str($s));
+        }
+
+        if ($tag == BSON_DOCUMENT) {
+            return $this->document(false);
+        }
+
+        if ($tag == BSON_ARRAY) {
+            return $this->document(true);
+        }
+
+        if ($tag == BSON_BINARY) {
+            return $this->binary();
+        }
+
+        if ($tag == BSON_UNDEFINED) {
+            return .ok(wrap('$undefined', Value::bool(true)));
+        }
+
+        if ($tag == BSON_OBJECTID) {
+            string $oid = try $this->oid();
+
+            return .ok(wrap('$oid', Value::str($oid)));
+        }
+
+        if ($tag == BSON_BOOL) {
+            return $this->boolean();
+        }
+
+        if ($tag == BSON_DATETIME) {
+            int64 $ms = try $this->int64();
+
+            return .ok(wrap('$date', wrap('$numberLong', Value::str(str::from($ms)))));
+        }
+
+        if ($tag == BSON_NULL) {
+            return .ok(Value::nil());
+        }
+
+        if ($tag == BSON_REGEX) {
+            return $this->regex();
+        }
+
+        if ($tag == BSON_DBPOINTER) {
+            return $this->dbPointer();
+        }
+
+        if ($tag == BSON_CODE) {
+            string $code = try $this->string();
+
+            return .ok(wrap('$code', Value::str($code)));
+        }
+
+        if ($tag == BSON_SYMBOL) {
+            string $symbol = try $this->string();
+
+            return .ok(wrap('$symbol', Value::str($symbol)));
+        }
+
+        if ($tag == BSON_CODE_SCOPE) {
+            return $this->codeScope();
+        }
+
+        if ($tag == BSON_INT32) {
+            int32 $n = try $this->int32();
+
+            return .ok(Value::int($n));
+        }
+
+        if ($tag == BSON_TIMESTAMP) {
+            uint64 $ts = try $this->uint64();
+
+            return .ok(bsonTimestamp($ts));
+        }
+
+        if ($tag == BSON_INT64) {
+            int64 $n = try $this->int64();
+
+            return .ok(Value::int($n));
+        }
+
+        if ($tag == BSON_MINKEY) {
+            return .ok(wrap('$minKey', Value::int(1)));
+        }
+
+        if ($tag == BSON_MAXKEY) {
+            return .ok(wrap('$maxKey', Value::int(1)));
+        }
+
+        return .error(Error::unexpected(bsonPlace($at)));
+    }
+
+    function binary() : result<Value, Error>
+    {
+        usize $start = $this->i;
+        int32 $len = try $this->int32();
+
+        if ($len < 0) {
+            return .error(Error::unexpected(bsonPlace($start)));
+        }
+
+        string $head = try $this->take(1);
+
+        uint8 $subtype = $head->byte(0);
+        usize $n = $len as usize;
+
+        if ($subtype == BSON_BINARY_OLD) {
+            usize $inner = $this->i;
+            int32 $old = try $this->int32();
+
+            if ($old < 0 || ($old as usize) + 4 != $n) {
+                return .error(Error::unexpected(bsonPlace($inner)));
+            }
+
+            $n = $old as usize;
+        }
+
+        string $data = try $this->take($n);
+
+        return .ok(wrap('$binary', Value::object([
+            'base64' => Value::str(base64Encode($data)),
+            'subType' => Value::str(hexByte($subtype)),
+        ])));
+    }
+
+    function boolean() : result<Value, Error>
+    {
+        usize $at = $this->i;
+        string $b = try $this->take(1);
+
+        uint8 $v = $b->byte(0);
+
+        if ($v > 1) {
+            return .error(Error::unexpected(bsonPlace($at)));
+        }
+
+        return .ok(Value::bool($v == 1));
+    }
+
+    function regex() : result<Value, Error>
+    {
+        string $pattern = try $this->cstring();
+
+        string $options = try $this->cstring();
+
+        return .ok(wrap('$regularExpression', Value::object([
+            'pattern' => Value::str($pattern),
+            'options' => Value::str($options),
+        ])));
+    }
+
+    function dbPointer() : result<Value, Error>
+    {
+        string $ns = try $this->string();
+
+        string $oid = try $this->oid();
+
+        return .ok(wrap('$dbPointer', Value::object([
+            '$ref' => Value::str($ns),
+            '$id' => wrap('$oid', Value::str($oid)),
+        ])));
+    }
+
+    /**
+     * Code with a scope: a total length, the code as a string, the scope as a document, and the
+     * total has to be exactly those.
+     */
+    function codeScope() : result<Value, Error>
+    {
+        usize $start = $this->i;
+        int32 $total = try $this->int32();
+
+        string $code = try $this->string();
+
+        Value $scope = try $this->document(false);
+
+        if ($total < 0 || $start + ($total as usize) != $this->i) {
+            return .error(Error::unexpected(bsonPlace($start)));
+        }
+
+        return .ok(Value::object(['$code' => Value::str($code), '$scope' => $scope]));
+    }
+
+    // ---- primitives -----------------------------------------------------------------------------
+
+    /**
+     * The next `$n` bytes, or the reason there are not that many before the document ends.
+     */
+    function take(usize $n) : result<string, Error>
+    {
+        try $this->within($this->i + $n, $this->i);
+
+        string $out = $this->src->sub($this->i, $n);
+
+        $this->i = $this->i + $n;
+
+        return .ok($out);
+    }
+
+    /**
+     * Whether a read may run up to `$stop`. Past the input is unterminated; past the enclosing
+     * document, which promised to end sooner, is a bad length. Either is reported at `$at`.
+     */
+    function within(usize $stop, usize $at) : status<Error>
+    {
+        if ($stop > $this->src->size()) {
+            return .error(Error::unterminated(bsonPlace($at)));
+        }
+
+        if ($stop > $this->end) {
+            return .error(Error::unexpected(bsonPlace($at)));
+        }
+
+        return .ok;
+    }
+
+    function uint64() : result<uint64, Error>
+    {
+        string $b = try $this->take(8);
+
+        return .ok(littleEndian($b));
+    }
+
+    function int64() : result<int64, Error>
+    {
+        uint64 $u = try $this->uint64();
+
+        return .ok($u as int64);
+    }
+
+    function int32() : result<int32, Error>
+    {
+        string $b = try $this->take(4);
+
+        uint32 $u = littleEndian($b) as uint32;
+
+        return .ok($u as int32);
+    }
+
+    /**
+     * A BSON string: an int32 length counting the trailing `0x00`, then the bytes. The bytes may
+     * hold a `0x00` of their own; the length is what ends them.
+     */
+    function string() : result<string, Error>
+    {
+        usize $start = $this->i;
+        int32 $len = try $this->int32();
+
+        if ($len < 1) {
+            return .error(Error::unexpected(bsonPlace($start)));
+        }
+
+        string $raw = try $this->take($len as usize);
+
+        usize $n = $raw->size() - 1;
+
+        if ($raw->byte($n) != BSON_END) {
+            return .error(Error::unexpected(bsonPlace($this->i - 1)));
+        }
+
+        // a copy, not a view: a view would keep the whole input alive as long as the tree
+        string $s = string($raw->view()->sub(0, $n));
+
+        if (!str::is_utf8($s)) {
+            return .error(Error::badUtf8(bsonPlace($start + 4)));
+        }
+
+        return .ok($s);
+    }
+
+    /**
+     * A key or a regex part: bytes up to a `0x00` that has to come before the document ends.
+     */
+    function cstring() : result<string, Error>
+    {
+        usize $start = $this->i;
+        usize $end = $this->end;
+        usize $k = $start;
+
+        while ($k < $end && $this->src->byte($k) != BSON_END) {
+            $k = $k + 1;
+        }
+
+        if ($k >= $end) {
+            return .error(Error::unexpected(bsonPlace($start)));
+        }
+
+        string $s = string($this->src->view()->sub($start, $k - $start));
+
+        if (!str::is_utf8($s)) {
+            return .error(Error::badUtf8(bsonPlace($start)));
+        }
+
+        $this->i = $k + 1;
+
+        return .ok($s);
+    }
+
+    function oid() : result<string, Error>
+    {
+        string $b = try $this->take(OID_BYTES);
+
+        return .ok(str::hex($b->view()));
+    }
+
+    function here() : Place
+    {
+        return bsonPlace($this->i);
+    }
+}
+
+function bsonPlace(usize $offset) : Place
+{
+    int64 $off = $offset as int64;
+
+    return Place(1, $off + 1, $off);
+}
+
+/**
+ * Up to eight bytes, least significant first.
+ */
+function littleEndian(const string& $b) : uint64
+{
+    uint64 $out = 0;
+    usize $k = $b->size();
+
+    while ($k > 0) {
+        $k = $k - 1;
+
+        uint64 $byte = $b->byte($k);
+
+        $out = ($out << 8) | $byte;
+    }
+
+    return $out;
+}
+
+/**
+ * A finite double is a `float`. NaN and the infinities are not JSON numbers, so they come back as
+ * `{"$numberDouble": ...}` and a later `json::dump` of the tree does not die on them.
+ */
+function bsonDouble(float64 $n) : Value
+{
+    if (floatIsNan($n)) {
+        return wrap('$numberDouble', Value::str('NaN'));
+    }
+
+    if (floatIsInf($n)) {
+        if ($n > 0.0) {
+            return wrap('$numberDouble', Value::str('Infinity'));
+        }
+
+        return wrap('$numberDouble', Value::str('-Infinity'));
+    }
+
+    return Value::float($n);
+}
+
+/**
+ * The low four bytes are the increment, the high four the seconds.
+ */
+function bsonTimestamp(uint64 $ts) : Value
+{
+    int64 $t = ($ts >> 32) as int64;
+    int64 $i = ($ts & 4294967295) as int64;
+
+    return wrap('$timestamp', Value::object(['t' => Value::int($t), 'i' => Value::int($i)]));
+}
+
+/**
+ * A one-member object, the shape of every Extended JSON wrapper but code with a scope.
+ */
+function wrap(const string& $key, Value $v) : Value
+{
+    Fields $fields = Fields();
+
+    $fields->set($key, $v);
+
+    return Value::obj($fields);
+}
+
+/**
+ * Two lowercase hex digits.
+ */
+function hexByte(uint8 $b) : string
+{
+    uint64 $wide = $b;
+
+    return str::hex($wide)->sub(14, 2);
+}

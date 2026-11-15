@@ -1,0 +1,86 @@
+/**
+ * Echo containers into a Value: the implicit rows, and json::arr / json::object over a literal.
+ */
+
+use ecotest::expect;
+
+#[group: "unit"]
+test arrays_convert_by_element_type {
+    array<json::Value> $vals = [json::nil(), json::int(1)];
+    array<string> $strs = ['a', 'b'];
+    array<int32> $i32 = [1, 2];
+    array<int64> $i64 = [9000000000];
+    array<float64> $f64 = [1.5, 2.0];
+    array<bool> $bools = [true, false];
+
+    json::Value $doc = json::object();
+    $doc['v'] = $vals;
+    $doc['s'] = $strs;
+    $doc['i'] = $i32;
+    $doc['l'] = $i64;
+    $doc['f'] = $f64;
+    $doc['b'] = $bools;
+
+    expect(json::dump($doc))->is('{"v":[null,1],"s":["a","b"],"i":[1,2],"l":[9000000000],"f":[1.5,2.0],"b":[true,false]}');
+}
+
+#[group: "unit"]
+test ordered_maps_keep_their_order {
+    ordered_map<string, json::Value> $vals = ['z' => json::nil()];
+    ordered_map<string, string> $strs = ['z' => 'a', 'a' => 'b'];
+    ordered_map<string, int32> $i32 = ['z' => 1, 'a' => 2];
+    ordered_map<string, int64> $i64 = ['z' => 9000000000];
+    ordered_map<string, float64> $f64 = ['z' => 1.5];
+    ordered_map<string, bool> $bools = ['z' => true];
+
+    json::Value $doc = json::arr();
+    $doc[] = $vals;
+    $doc[] = $strs;
+    $doc[] = $i32;
+    $doc[] = $i64;
+    $doc[] = $f64;
+    $doc[] = $bools;
+
+    expect(json::dump($doc))->is('[{"z":null},{"z":"a","a":"b"},{"z":1,"a":2},{"z":9000000000},{"z":1.5},{"z":true}]');
+}
+
+#[group: "unit"]
+test maps_go_in_sorted_key_order {
+    map<string, json::Value> $vals = ['z' => json::nil(), 'a' => json::int(1)];
+    map<string, string> $strs = ['z' => 'a', 'a' => 'b'];
+    map<string, int32> $i32 = ['z' => 1, 'a' => 2];
+    map<string, int64> $i64 = ['z' => 9000000000, 'a' => 1];
+    map<string, float64> $f64 = ['z' => 1.5, 'a' => 0.5];
+    map<string, bool> $bools = ['z' => true, 'a' => false];
+
+    json::Value $doc = json::arr();
+    $doc[] = $vals;
+    $doc[] = $strs;
+    $doc[] = $i32;
+    $doc[] = $i64;
+    $doc[] = $f64;
+    $doc[] = $bools;
+
+    expect(json::dump($doc))->is('[{"a":1,"z":null},{"a":"b","z":"a"},{"a":2,"z":1},{"a":1,"z":9000000000},{"a":0.5,"z":1.5},{"a":false,"z":true}]');
+}
+
+#[group: "unit"]
+test a_declaration_converts_too {
+    array<string> $tags = ['echo'];
+    json::Value $v = $tags;
+
+    expect(json::dump($v))->is('["echo"]');
+}
+
+#[group: "unit"]
+test literals_build_mixed_containers {
+    json::Value $user = json::object([
+        'name' => 'mario',
+        'id' => 32,
+        'tags' => json::arr(['echo', 1, true, json::nil()]),
+    ]);
+    json::Value $dot = .array(['x', 2.5]);
+
+    expect(json::dump($user))->is('{"name":"mario","id":32,"tags":["echo",1,true,null]}');
+    expect(json::dump($dot))->is('["x",2.5]');
+}

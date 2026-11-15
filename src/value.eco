@@ -66,6 +66,22 @@ class Items
         $this->vals[] = $value;
     }
 
+    internal function remove(usize $i) : bool
+    {
+        if ($i >= $this->vals->count()) {
+            return false;
+        }
+
+        $this->vals->remove($i);
+
+        return true;
+    }
+
+    internal function clear() : void
+    {
+        $this->vals->clear();
+    }
+
     internal const function copy() : array<Value>
     {
         array<Value> $vals = $this->vals;
@@ -133,6 +149,21 @@ class Fields
     internal function set(const string& $key, Value $value) : void
     {
         $this->vals->set($key, $value);
+    }
+
+    internal const function has(const string& $key) : bool
+    {
+        return $this->vals->has($key);
+    }
+
+    internal function remove(const string& $key) : bool
+    {
+        return $this->vals->remove($key);
+    }
+
+    internal function clear() : void
+    {
+        $this->vals->clear();
     }
 
     internal const function copy() : ordered_map<string, Value>
@@ -238,6 +269,32 @@ public enum Value
         return Value::obj(Fields());
     }
 
+    /**
+     * An array holding `$vals` in order. A literal fills an `array<Value>` here, converting each
+     * element on the way in, so this is how a mixed array is written: `json::arr(['echo', 1, true])`.
+     */
+    public static function arr(const array<Value>& $vals) : Value
+    {
+        return listOf($vals);
+    }
+
+    /**
+     * Same as `arr($vals)`.
+     */
+    public static function array(const array<Value>& $vals) : Value
+    {
+        return listOf($vals);
+    }
+
+    /**
+     * An object holding `$vals` in their order. A literal fills an `ordered_map<string, Value>` here,
+     * so this is how a mixed object is written: `json::object(['name' => 'mario', 'id' => 32])`.
+     */
+    public static function object(const ordered_map<string, Value>& $vals) : Value
+    {
+        return objectOf($vals);
+    }
+
     // ---- inbound conversions --------------------------------------------------------------------
 
     /**
@@ -272,6 +329,122 @@ public enum Value
     public static function from(string $s) : Value
     {
         return Value::str($s);
+    }
+
+    /**
+     * An Echo container becomes an array or an object the same way, so `$user['tags'] = $tags`
+     * needs no loop. A `map` has no order of its own, so its keys go in sorted, and two dumps of the
+     * same map agree.
+     *
+     * Inbound conversions take their source by value and cannot be generic, hence one row per
+     * element type.
+     */
+    #[implicit]
+    public static function from(array<Value> $vals) : Value
+    {
+        return listOf($vals);
+    }
+
+    #[implicit]
+    public static function from(array<string> $vals) : Value
+    {
+        return listOf($vals);
+    }
+
+    #[implicit]
+    public static function from(array<int32> $vals) : Value
+    {
+        return listOf($vals);
+    }
+
+    #[implicit]
+    public static function from(array<int64> $vals) : Value
+    {
+        return listOf($vals);
+    }
+
+    #[implicit]
+    public static function from(array<float64> $vals) : Value
+    {
+        return listOf($vals);
+    }
+
+    #[implicit]
+    public static function from(array<bool> $vals) : Value
+    {
+        return listOf($vals);
+    }
+
+    #[implicit]
+    public static function from(ordered_map<string, Value> $vals) : Value
+    {
+        return objectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(ordered_map<string, string> $vals) : Value
+    {
+        return objectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(ordered_map<string, int32> $vals) : Value
+    {
+        return objectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(ordered_map<string, int64> $vals) : Value
+    {
+        return objectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(ordered_map<string, float64> $vals) : Value
+    {
+        return objectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(ordered_map<string, bool> $vals) : Value
+    {
+        return objectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(map<string, Value> $vals) : Value
+    {
+        return sortedObjectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(map<string, string> $vals) : Value
+    {
+        return sortedObjectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(map<string, int32> $vals) : Value
+    {
+        return sortedObjectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(map<string, int64> $vals) : Value
+    {
+        return sortedObjectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(map<string, float64> $vals) : Value
+    {
+        return sortedObjectOf($vals);
+    }
+
+    #[implicit]
+    public static function from(map<string, bool> $vals) : Value
+    {
+        return sortedObjectOf($vals);
     }
 
     // ---- predicates -----------------------------------------------------------------------------
@@ -492,14 +665,16 @@ public enum Value
     }
 
     /**
-     * Walks `$path` as successive object keys. Stops at the first miss or non-object.
+     * Walks `$path` one segment at a time. On an object a segment is a key, taken verbatim. On an
+     * array it is an index spelled the RFC 6901 way (`0`, or digits with no leading zero). Stops at
+     * the first miss, the first segment an array cannot read as an index, or the first scalar.
      */
     public const function pick(const array<string>& $path) : Value?
     {
         Value $cur = $this;
 
-        foreach ($path as $key) {
-            Value $step = guard $cur->get($key) else {
+        foreach ($path as const &$token) {
+            Value $step = guard step($cur, $token) else {
                 return null;
             }
 
@@ -507,6 +682,102 @@ public enum Value
         }
 
         return $cur;
+    }
+
+    /**
+     * Walks an RFC 6901 JSON Pointer such as `/users/0/name`. `''` is this value, and `~1` / `~0`
+     * spell a `/` / `~` inside a key. A pointer that is not one (no leading `/`, a `~` not followed
+     * by `0` or `1`) finds nothing, and so does `-`, which names the slot past the end.
+     */
+    public const function pick(const string& $pointer) : Value?
+    {
+        array<string> $path = guard tokens($pointer) else {
+            return null;
+        }
+
+        return $this->pick($path);
+    }
+
+    /**
+     * The object's keys, in order. Empty for every other kind. A copy of the key list only, not of
+     * the values.
+     */
+    public const function keys() : array<string>
+    {
+        match ($this) {
+            Value::obj($fields) => {
+                return $fields->keys();
+            },
+            else => {
+                return array<string>();
+            },
+        }
+    }
+
+    /**
+     * A cursor over an array's elements, keyed by index. Nothing is copied: `as &$item` writes reach
+     * the tree. Any other kind iterates zero times.
+     *
+     *     foreach ($v->elements() as $i => const &$item) { ... }
+     */
+    public const function elements() : Elements
+    {
+        match ($this) {
+            Value::list($items) => {
+                return Elements($items);
+            },
+            else => {
+                return Elements(Items());
+            },
+        }
+    }
+
+    /**
+     * A cursor over an object's members, keyed by name, in order. Only the key list is copied:
+     * `as &$item` writes reach the tree. Any other kind iterates zero times.
+     *
+     *     foreach ($v->members() as $key => const &$item) { ... }
+     */
+    public const function members() : Members
+    {
+        match ($this) {
+            Value::obj($fields) => {
+                return Members($fields);
+            },
+            else => {
+                return Members(Fields());
+            },
+        }
+    }
+
+    /**
+     * Every leaf of this tree in one object, keyed by its JSON Pointer:
+     * `{"a":{"b":[1]}}` flattens to `{"/a/b/0":1}`. An empty array or object is a leaf of its own,
+     * so `unflatten` gives back exactly this tree. A scalar flattens to `{"": value}`.
+     */
+    public const function flatten() : Value
+    {
+        Fields $out = Fields();
+
+        flattenInto($out, '', $this);
+
+        return Value::obj($out);
+    }
+
+    /**
+     * The tree a `flatten` came from. Each key is a JSON Pointer to where its value goes; an index
+     * segment under a fresh node makes an array (a gap fills with `null`), anything else an object.
+     */
+    public const function unflatten() : result<Value, PointerError>
+    {
+        match ($this) {
+            Value::obj($fields) => {
+                return unflattenFields($fields);
+            },
+            else => {
+                return .error(.notObject);
+            },
+        }
     }
 
     // ---- mutation -------------------------------------------------------------------------------
@@ -554,6 +825,82 @@ public enum Value
                 die('json::Value: append on a non-array');
             },
         }
+    }
+
+    /**
+     * Removes the member `$key`. False when this is not an object or the key was not there.
+     */
+    public function remove(const string& $key) : bool
+    {
+        match ($this) {
+            Value::obj($fields) => {
+                return $fields->remove($key);
+            },
+            else => {
+                return false;
+            },
+        }
+    }
+
+    /**
+     * Removes the element at `$i`, shifting the rest down. False when this is not an array or `$i`
+     * is past the end.
+     */
+    public function removeAt(usize $i) : bool
+    {
+        match ($this) {
+            Value::list($items) => {
+                return $items->remove($i);
+            },
+            else => {
+                return false;
+            },
+        }
+    }
+
+    /**
+     * Empties an array or object in place, so every alias of the box sees it empty. Does nothing to
+     * a scalar.
+     */
+    public function clear() : void
+    {
+        match ($this) {
+            Value::list($items) => {
+                $items->clear();
+            },
+            Value::obj($fields) => {
+                $fields->clear();
+            },
+            else => {},
+        }
+    }
+
+    /**
+     * Copies every member of `$other` in, overwriting a key this object already has. A rewritten
+     * key keeps its place and a new one goes last. What comes in is cloned, so `$other` stays
+     * independent. Both sides must be objects; anything else is a bug in the caller.
+     */
+    public function update(const Value& $other) : void
+    {
+        mergeInto(fieldsOf($this, 'update'), fieldsOf($other, 'update'), false);
+    }
+
+    /**
+     * `update`, recursively: where both sides hold an object under the same key, that object is
+     * merged rather than replaced. Everything else is overwritten with a clone.
+     */
+    public function merge(const Value& $other) : void
+    {
+        mergeInto(fieldsOf($this, 'merge'), fieldsOf($other, 'merge'), true);
+    }
+
+    /**
+     * Appends a clone of every element of `$other`. Both sides must be arrays; anything else is a bug
+     * in the caller.
+     */
+    public function extend(const Value& $other) : void
+    {
+        extendInto(itemsOf($this, 'extend'), itemsOf($other, 'extend'));
     }
 
     /**
@@ -648,4 +995,14 @@ public function arr() : Value
 public function object() : Value
 {
     return Value::object();
+}
+
+public function arr(const array<Value>& $vals) : Value
+{
+    return Value::arr($vals);
+}
+
+public function object(const ordered_map<string, Value>& $vals) : Value
+{
+    return Value::object($vals);
 }

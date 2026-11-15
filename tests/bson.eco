@@ -1,0 +1,412 @@
+/**
+ * BSON through `json::parse<bson>` / `json::dump<bson>`: the mapping, the wrapper rule, the places
+ * errors point at, and the two ways a write fails. The corpus file holds the byte-for-byte cases; these are the
+ * ones it does not say.
+ */
+
+use ecotest::expect;
+use json::bson;
+
+/**
+ * Bytes from lowercase hex, two digits each.
+ */
+function unhex(const string& $hex) : string
+{
+    string $out = '';
+    usize $i = 0;
+
+    while ($i < $hex->size()) {
+        uint64 $b = guard str::uint(str::concat('0x', $hex->sub($i, 2)));
+
+        $out->push($b as uint8);
+        $i = $i + 2;
+    }
+
+    return $out;
+}
+
+function hexOf(const string& $bytes) : string
+{
+    return str::hex($bytes->view());
+}
+
+/**
+ * The JSON text a BSON document reads as.
+ */
+function bsonText(const string& $hex) : string
+{
+    return json::dump(expect(json::parse<bson>(bytes: unhex($hex)))->ok());
+}
+
+/**
+ * The BSON a JSON text writes as, in hex.
+ */
+function bsonHex(const string& $text) : string
+{
+    return hexOf(expect(json::dump<bson>(value: expect(json::parse($text))->ok()))->ok());
+}
+
+/**
+ * JSON text through BSON and back.
+ */
+function viaBson(const string& $text) : string
+{
+    string $bytes = expect(json::dump<bson>(value: expect(json::parse($text))->ok()))->ok();
+
+    return json::dump(expect(json::parse<bson>(bytes: $bytes))->ok());
+}
+
+/**
+ * How BSON bytes were refused, and at which offset: `unexpected@4`.
+ */
+function bsonFault(const string& $hex) : string
+{
+    json::Error $e = expect(json::parse<bson>(bytes: unhex($hex)))->fails();
+    string $case = kind($e);
+
+    return "{$case}@{$e->offset()}";
+}
+
+function corpusRoundTrips(const string& $hex) : void
+{
+    corpusDegenerate($hex, $hex);
+}
+
+function corpusParses(const string& $hex) : void
+{
+    expect(json::parse<bson>(bytes: unhex($hex)))->ok();
+}
+
+function corpusReads(const string& $hex, const string& $text) : void
+{
+    expect(bsonText($hex))->is($text);
+}
+
+/**
+ * A degenerate spelling reads, and writes back as the canonical one.
+ */
+function corpusDegenerate(const string& $hex, const string& $canonical) : void
+{
+    json::Value $v = expect(json::parse<bson>(bytes: unhex($hex)))->ok();
+
+    expect(hexOf(expect(json::dump<bson>(value: $v))->ok()))->is($canonical);
+}
+
+function corpusRefuses(const string& $hex) : void
+{
+    expect(json::parse<bson>(bytes: unhex($hex)))->fails();
+}
+
+// ---- reading ------------------------------------------------------------------------------------
+
+#[group: "unit"]
+test reads_the_json_kinds {
+    expect(bsonText('0500000000'))->is('{}');
+    expect(bsonText('0c0000001061000100000000'))->is('{"a":1}');
+    expect(bsonText('1000000012610000f2052a0100000000'))->is('{"a":5000000000}');
+    expect(bsonText('10000000016100000000000000f83f00'))->is('{"a":1.5}');
+    expect(bsonText('0e00000002610002000000620000'))->is('{"a":"b"}');
+    expect(bsonText('090000000861000100'))->is('{"a":true}');
+    expect(bsonText('090000000861000000'))->is('{"a":false}');
+    expect(bsonText('080000000a610000'))->is('{"a":null}');
+    expect(bsonText('140000000461000c000000103000010000000000'))->is('{"a":[1]}');
+}
+
+#[group: "unit"]
+test reads_the_other_kinds_as_extended_json {
+    expect(bsonText('1400000007610000000000000000000000000000'))->is('{"a":{"$oid":"000000000000000000000000"}}');
+    expect(bsonText('10000000096100c5d8d6cc3b01000000'))->is('{"a":{"$date":{"$numberLong":"1356351330501"}}}');
+    expect(bsonText('0f0000000578000200000001ffff00'))->is('{"x":{"$binary":{"base64":"//8=","subType":"01"}}}');
+    expect(bsonText('13000000057800060000000202000000ffff00'))->is('{"x":{"$binary":{"base64":"//8=","subType":"02"}}}');
+    expect(bsonText('0800000006610000'))->is('{"a":{"$undefined":true}}');
+    expect(bsonText('0f0000000b610061626300696d0000'))->is('{"a":{"$regularExpression":{"pattern":"abc","options":"im"}}}');
+    expect(bsonText('1a0000000c610002000000620056e1fc72e0c917e9c471416100'))->is('{"a":{"$dbPointer":{"$ref":"b","$id":{"$oid":"56e1fc72e0c917e9c4714161"}}}}');
+    expect(bsonText('0e0000000d610002000000620000'))->is('{"a":{"$code":"b"}}');
+    expect(bsonText('0e0000000e610002000000620000'))->is('{"a":{"$symbol":"b"}}');
+    expect(bsonText('1a0000000f610012000000050000006162636400050000000000'))->is('{"a":{"$code":"abcd","$scope":{}}}');
+    expect(bsonText('100000001161002a00000015cd5b0700'))->is('{"a":{"$timestamp":{"t":123456789,"i":42}}}');
+    expect(bsonText('08000000ff610000'))->is('{"a":{"$minKey":1}}');
+    expect(bsonText('080000007f610000'))->is('{"a":{"$maxKey":1}}');
+}
+
+#[group: "unit"]
+test non_finite_doubles_read_as_wrappers_so_json_dump_survives {
+    expect(bsonText('10000000016400000000000000f87f00'))->is('{"d":{"$numberDouble":"NaN"}}');
+    expect(bsonText('10000000016400000000000000f07f00'))->is('{"d":{"$numberDouble":"Infinity"}}');
+    expect(bsonText('10000000016400000000000000f0ff00'))->is('{"d":{"$numberDouble":"-Infinity"}}');
+}
+
+#[group: "unit"]
+test array_keys_are_not_looked_at {
+    // the one element sits under key "x", not "0"
+    expect(bsonText('140000000461000c000000107800010000000000'))->is('{"a":[1]}');
+}
+
+#[group: "unit"]
+test a_string_may_hold_a_nul {
+    json::Value $v = expect(json::parse<bson>(bytes: unhex('10000000026100040000006200630000')))->ok();
+    string $s = $v['a']->asStr() ?? '';
+
+    expect($s->size())->is(3);
+    expect($s->byte(1))->is(0);
+}
+
+// ---- writing ------------------------------------------------------------------------------------
+
+#[group: "unit"]
+test writes_the_json_kinds {
+    expect(bsonHex('{}'))->is('0500000000');
+    expect(bsonHex('{"a":1}'))->is('0c0000001061000100000000');
+    expect(bsonHex('{"a":5000000000}'))->is('1000000012610000f2052a0100000000');
+    expect(bsonHex('{"a":1.5}'))->is('10000000016100000000000000f83f00');
+    expect(bsonHex('{"a":"b"}'))->is('0e00000002610002000000620000');
+    expect(bsonHex('{"a":true}'))->is('090000000861000100');
+    expect(bsonHex('{"a":false}'))->is('090000000861000000');
+    expect(bsonHex('{"a":null}'))->is('080000000a610000');
+    expect(bsonHex('{"a":[1]}'))->is('140000000461000c000000103000010000000000');
+}
+
+#[group: "unit"]
+test an_int_is_int32_until_it_does_not_fit {
+    expect(bsonHex('{"a":2147483647}'))->is('0c000000106100ffffff7f00');
+    expect(bsonHex('{"a":-2147483648}'))->is('0c0000001061000000008000');
+    expect(bsonHex('{"a":2147483648}'))->is('10000000126100000000800000000000');
+    expect(bsonHex('{"a":-2147483649}'))->is('10000000126100ffffff7fffffffff00');
+}
+
+#[group: "unit"]
+test number_long_forces_an_int64 {
+    expect(bsonHex('{"a":{"$numberLong":"1"}}'))->is('10000000126100010000000000000000');
+    expect(viaBson('{"a":{"$numberLong":"1"}}'))->is('{"a":1}');
+}
+
+#[group: "unit"]
+test number_double_writes_a_double {
+    expect(viaBson('{"a":{"$numberDouble":"2.5"}}'))->is('{"a":2.5}');
+    expect(viaBson('{"a":{"$numberDouble":"NaN"}}'))->is('{"a":{"$numberDouble":"NaN"}}');
+    expect(viaBson('{"a":{"$numberDouble":"Infinity"}}'))->is('{"a":{"$numberDouble":"Infinity"}}');
+    expect(viaBson('{"a":{"$numberDouble":"-Infinity"}}'))->is('{"a":{"$numberDouble":"-Infinity"}}');
+}
+
+#[group: "unit"]
+test a_binary_subtype_may_be_one_digit {
+    expect(viaBson('{"a":{"$binary":{"base64":"//8=","subType":"5"}}}'))->is('{"a":{"$binary":{"base64":"//8=","subType":"05"}}}');
+}
+
+#[group: "unit"]
+test the_wrappers_write_their_types {
+    array<string> $docs = [
+        '{"a":{"$oid":"56e1fc72e0c917e9c4714161"}}',
+        '{"a":{"$date":{"$numberLong":"-1"}}}',
+        '{"a":{"$binary":{"base64":"AAEC","subType":"80"}}}',
+        '{"a":{"$binary":{"base64":"+/8=","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"//8=","subType":"02"}}}',
+        '{"a":{"$undefined":true}}',
+        '{"a":{"$regularExpression":{"pattern":"^a","options":"i"}}}',
+        '{"a":{"$dbPointer":{"$ref":"db.c","$id":{"$oid":"56E1FC72E0C917E9C4714161"}}}}',
+        '{"a":{"$code":"x()"}}',
+        '{"a":{"$symbol":"s"}}',
+        '{"a":{"$code":"x","$scope":{"y":{"$oid":"000000000000000000000000"}}}}',
+        '{"a":{"$timestamp":{"t":4294967295,"i":4294967295}}}',
+        '{"a":{"$minKey":1}}',
+        '{"a":{"$maxKey":1}}',
+    ];
+
+    foreach ($docs as const &$doc) {
+        string $back = viaBson($doc);
+
+        // the uppercase ObjectId reads back lowercase; everything else is the text that went in
+        expect(str::lower($back))->is(str::lower($doc));
+    }
+}
+
+#[group: "unit"]
+test a_near_miss_is_an_ordinary_document {
+    array<string> $docs = [
+        '{"a":{"$oid":"nope"}}',
+        '{"a":{"$oid":"zz0000000000000000000000"}}',
+        '{"a":{"$oid":"0z0000000000000000000000"}}',
+        '{"a":{"$oid":1}}',
+        '{"a":{"$date":1}}',
+        '{"a":{"$date":{"$numberLong":"x"}}}',
+        '{"a":{"$date":{"$other":"1"}}}',
+        '{"a":{"$numberLong":"x"}}',
+        '{"a":{"$numberLong":1}}',
+        '{"a":{"$numberDouble":"x"}}',
+        '{"a":{"$numberDouble":1.5}}',
+        '{"a":{"$binary":1}}',
+        '{"a":{"$binary":{"base64":"AA==","subType":"00","x":1}}}',
+        '{"a":{"$binary":{"b64":"AA==","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"AA==","sub":"00"}}}',
+        '{"a":{"$binary":{"base64":1,"subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"AA==","subType":0}}}',
+        '{"a":{"$binary":{"base64":"!!!!","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"AAA","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"A===","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"AA=A","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"AA==AAAA","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"QR==","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"QUJ=","subType":"00"}}}',
+        '{"a":{"$binary":{"base64":"AA==","subType":""}}}',
+        '{"a":{"$binary":{"base64":"AA==","subType":"100"}}}',
+        '{"a":{"$binary":{"base64":"AA==","subType":"0g"}}}',
+        '{"a":{"$undefined":false}}',
+        '{"a":{"$undefined":1}}',
+        '{"a":{"$regularExpression":1}}',
+        '{"a":{"$regularExpression":{"pattern":"a"}}}',
+        '{"a":{"$regularExpression":{"p":"a","options":""}}}',
+        '{"a":{"$regularExpression":{"pattern":"a","o":""}}}',
+        '{"a":{"$regularExpression":{"pattern":1,"options":""}}}',
+        '{"a":{"$regularExpression":{"pattern":"a","options":1}}}',
+        '{"a":{"$regularExpression":{"pattern":"a\\u0000b","options":""}}}',
+        '{"a":{"$regularExpression":{"pattern":"a","options":"i\\u0000"}}}',
+        '{"a":{"$dbPointer":1}}',
+        '{"a":{"$dbPointer":{"r":"b","$id":{"$oid":"000000000000000000000000"}}}}',
+        '{"a":{"$dbPointer":{"$ref":"b","i":{"$oid":"000000000000000000000000"}}}}',
+        '{"a":{"$dbPointer":{"$ref":1,"$id":{"$oid":"000000000000000000000000"}}}}',
+        '{"a":{"$dbPointer":{"$ref":"b","$id":1}}}',
+        '{"a":{"$dbPointer":{"$ref":"b","$id":{"x":"000000000000000000000000"}}}}',
+        '{"a":{"$dbPointer":{"$ref":"b","$id":{"$oid":"nope"}}}}',
+        '{"a":{"$code":1}}',
+        '{"a":{"$symbol":1}}',
+        '{"a":{"$timestamp":1}}',
+        '{"a":{"$timestamp":{"x":1,"i":1}}}',
+        '{"a":{"$timestamp":{"t":1,"x":1}}}',
+        '{"a":{"$timestamp":{"t":"1","i":1}}}',
+        '{"a":{"$timestamp":{"t":1,"i":"1"}}}',
+        '{"a":{"$timestamp":{"t":-1,"i":1}}}',
+        '{"a":{"$timestamp":{"t":4294967296,"i":1}}}',
+        '{"a":{"$timestamp":{"t":1,"i":-1}}}',
+        '{"a":{"$timestamp":{"t":1,"i":4294967296}}}',
+        '{"a":{"$minKey":2}}',
+        '{"a":{"$maxKey":"1"}}',
+        '{"a":{"$code":"x","$other":{}}}',
+        '{"a":{"$other":"x","$scope":{}}}',
+        '{"a":{"$code":1,"$scope":{}}}',
+        '{"a":{"$code":"x","$scope":1}}',
+        '{"a":{"$other":1}}',
+        '{"a":{"$oid":"000000000000000000000000","x":1,"y":2}}',
+    ];
+
+    foreach ($docs as const &$doc) {
+        expect(viaBson($doc))->is($doc);
+    }
+}
+
+/**
+ * Why a JSON text could not be written as BSON.
+ */
+function bsonRefusal(const string& $text) : json::DumpError
+{
+    return expect(json::dump<bson>(value: expect(json::parse($text))->ok()))->fails();
+}
+
+/**
+ * The message for a key with a `0x00` byte, under `$parent`, with `$key` before the `0x00`.
+ */
+function nulMessage(const string& $parent, const string& $key) : string
+{
+    string $p = str::concat(str::concat($parent, '/'), $key);
+
+    $p->push(0);
+
+    return "'{$p}' has a key with a 0x00 byte";
+}
+
+#[group: "unit"]
+test a_root_that_is_not_an_object_is_refused {
+    json::DumpError $e = expect(json::dump<bson>(value: json::int(1)))->fails();
+
+    expect("{$e}")->is('only an object can be the root');
+    expect(bsonRefusal('[1]')->message())->is('only an object can be the root');
+}
+
+#[group: "unit"]
+test a_nul_in_a_key_is_refused_with_its_pointer {
+    expect(bsonRefusal('{"a\\u0000":1}')->message())->is(nulMessage('', 'a'));
+    expect(bsonRefusal('{"a":{"b\\u0000":1}}')->message())->is(nulMessage('/a', 'b'));
+    expect(bsonRefusal('{"a":[1,{"\\u0000":1}]}')->message())->is(nulMessage('/a/1', ''));
+    expect(bsonRefusal('{"x/y~":{"\\u0000":1}}')->message())->is(nulMessage('/x~1y~0', ''));
+    // the scope is not a scope, so the ordinary document is the one that names the key
+    expect(bsonRefusal('{"a":{"$code":"x","$scope":{"\\u0000":1}}}')->message())->is(nulMessage('/a/$scope', ''));
+}
+
+// ---- refusals -----------------------------------------------------------------------------------
+
+#[group: "unit"]
+test refusals_name_the_case_and_the_offset {
+    expect(bsonFault(''))->is('empty@0');
+    expect(bsonFault('0500'))->is('unterminated@0');
+    expect(bsonFault('0c00000010610001'))->is('unterminated@0');
+    expect(bsonFault('050000000000'))->is('trailing@5');
+    expect(bsonFault('04000000'))->is('unexpected@0');
+    expect(bsonFault('0500000001'))->is('unexpected@5');
+    expect(bsonFault('060000000000'))->is('unexpected@4');
+    expect(bsonFault('0800000014610000'))->is('unexpected@4');
+    expect(bsonFault('090000000861000200'))->is('unexpected@7');
+    expect(bsonFault('080000000aff0000'))->is('badUtf8@5');
+    expect(bsonFault('0e00000002610002000000ff0000'))->is('badUtf8@11');
+}
+
+/**
+ * `$hex` with zeros after it, so a read that runs past the document still has input under it.
+ */
+function padded(const string& $hex) : string
+{
+    return str::concat($hex, str::repeat('00', 32));
+}
+
+#[group: "unit"]
+test a_value_past_its_document_is_unexpected_not_truncated {
+    // the root claims seven bytes, so its one element has nothing left before the terminator
+    expect(bsonFault(padded('07000000076100')))->is('unexpected@7');
+    expect(bsonFault(padded('07000000116100')))->is('unexpected@7');
+    expect(bsonFault(padded('07000000056100')))->is('unexpected@7');
+    expect(bsonFault(padded('0b0000000561000000000000')))->is('unexpected@11');
+    expect(bsonFault(padded('0c000000056100040000000200')))->is('unexpected@12');
+    expect(bsonFault(padded('07000000086100')))->is('unexpected@7');
+    expect(bsonFault(padded('070000000b6100')))->is('unexpected@7');
+    expect(bsonFault(padded('090000000b61006100')))->is('unexpected@9');
+    expect(bsonFault(padded('070000000f6100')))->is('unexpected@7');
+    expect(bsonFault(padded('07000000026100')))->is('unexpected@7');
+    // an embedded document that claims more than its parent has
+    expect(bsonFault(padded('0c0000000361000a000000')))->is('unexpected@7');
+}
+
+#[group: "unit"]
+test decimal128_is_not_read_yet {
+    expect(bsonFault('180000001364000000000000000000000000000000403000'))->is('unexpected@4');
+}
+
+#[group: "unit"]
+test an_error_reads_as_a_byte_column {
+    json::Error $e = expect(json::parse<bson>(bytes: unhex('050000000000')))->fails();
+
+    expect("{$e}")->is('trailing data at 1:6');
+    expect($e->line())->is(1);
+}
+
+#[group: "unit"]
+test nesting_stops_at_the_cap {
+    json::Value $deep = json::object();
+    int32 $n = 1;
+
+    // 128 documents, the root among them, is the most the reader takes
+    while ($n < 128) {
+        json::Value $outer = json::object();
+
+        $outer['a'] = $deep;
+        $deep = $outer;
+        $n = $n + 1;
+    }
+
+    expect(json::parse<bson>(bytes: expect(json::dump<bson>(value: $deep))->ok()))->ok();
+
+    json::Value $over = json::object();
+
+    $over['a'] = $deep;
+
+    json::Error $e = expect(json::parse<bson>(bytes: expect(json::dump<bson>(value: $over))->ok()))->fails();
+
+    expect(kind($e))->is('tooDeep');
+}

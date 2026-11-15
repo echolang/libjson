@@ -1,0 +1,77 @@
+/**
+ * update / merge / extend.
+ */
+
+use ecotest::expect;
+
+#[group: "unit"]
+test update_overwrites_and_appends {
+    json::Value $into = expect(json::parse('{"a":{"b":1,"c":2},"k":1}'))->ok();
+    json::Value $from = expect(json::parse('{"a":{"b":9},"n":true}'))->ok();
+
+    $into->update($from);
+
+    expect(json::dump($into))->is('{"a":{"b":9},"k":1,"n":true}');
+}
+
+#[group: "unit"]
+test merge_recurses_into_objects {
+    json::Value $into = expect(json::parse('{"a":{"b":1,"c":2},"s":1,"k":[1]}'))->ok();
+    json::Value $from = expect(json::parse('{"a":{"b":9,"d":4},"s":{"x":1},"k":[2],"n":{"m":1}}'))->ok();
+
+    $into->merge($from);
+
+    // a: merged. s: a scalar replaced by an object. k: arrays replace. n: a new key
+    expect(json::dump($into))->is('{"a":{"b":9,"c":2,"d":4},"s":{"x":1},"k":[2],"n":{"m":1}}');
+}
+
+#[group: "unit"]
+test what_comes_in_is_cloned {
+    json::Value $into = json::object();
+    json::Value $from = expect(json::parse('{"a":{"b":1},"l":[1]}'))->ok();
+
+    $into->merge($from);
+    $from['a']['b'] = 2;
+    $from['l'][] = 2;
+
+    expect(json::dump($into))->is('{"a":{"b":1},"l":[1]}');
+}
+
+#[group: "unit"]
+test extend_appends_clones {
+    json::Value $into = expect(json::parse('[1]'))->ok();
+    json::Value $from = expect(json::parse('[[2]]'))->ok();
+
+    $into->extend($from);
+    $from[0][] = 3;
+
+    // the same box on both sides doubles the array once
+    json::Value $same = $into;
+    $into->extend($same);
+
+    expect(json::dump($into))->is('[1,[2],1,[2]]');
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test update_on_a_non_object_dies {
+    json::Value $n = json::int(1);
+
+    $n->update(json::object());
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test merge_from_a_non_object_dies {
+    json::Value $obj = json::object();
+
+    $obj->merge(json::arr());
+}
+
+#[group: "unit"]
+#[tests: expects death]
+test extend_on_a_non_array_dies {
+    json::Value $obj = json::object();
+
+    $obj->extend(json::arr());
+}

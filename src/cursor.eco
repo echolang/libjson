@@ -1,0 +1,84 @@
+/**
+ * Iterating a `Value` without copying it.
+ *
+ * `elements()` and `members()` hand back one of these. Each holds the shared box, so the box lives as
+ * long as the loop does, and `current()` is the same place `[]` names, so `as &$item` writes reach
+ * the tree. Mutating the container while the loop runs is the usual Echo rule: don't.
+ */
+
+namespace json;
+
+/**
+ * A cursor over an array's elements, keyed by index.
+ */
+public struct Elements : contract::iterator<Value>, contract::keyed<usize>
+{
+    private Items $items;
+    private usize $next;
+
+    internal constructor(Items $items)
+    {
+        $this->items = $items;
+        $this->next = 0;
+    }
+
+    public function advance() : bool
+    {
+        if ($this->next >= $this->items->count()) {
+            return false;
+        }
+
+        $this->next = $this->next + 1;
+
+        return true;
+    }
+
+    public function current() : Value&
+    {
+        return $this->items->slot($this->next - 1);
+    }
+
+    public function key() : usize
+    {
+        return $this->next - 1;
+    }
+}
+
+/**
+ * A cursor over an object's members, keyed by name, in order. The key list is a snapshot taken when
+ * the loop starts; the values are read through the box.
+ */
+public struct Members : contract::iterator<Value>, contract::keyed<string>
+{
+    private Fields $fields;
+    private array<string> $names;
+    private usize $next;
+
+    internal constructor(Fields $fields)
+    {
+        $this->fields = $fields;
+        $this->names = $fields->keys();
+        $this->next = 0;
+    }
+
+    public function advance() : bool
+    {
+        if ($this->next >= $this->names->count()) {
+            return false;
+        }
+
+        $this->next = $this->next + 1;
+
+        return true;
+    }
+
+    public function current() : Value&
+    {
+        return $this->fields->slot($this->names[$this->next - 1]);
+    }
+
+    public function key() : string
+    {
+        return $this->names[$this->next - 1];
+    }
+}

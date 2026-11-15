@@ -1,0 +1,390 @@
+/**
+ * RFC 6901 JSON Pointer: `pick('/users/0/name')`, `flatten`, `unflatten`.
+ *
+ * A pointer is `''` (the whole document) or a run of `/`-led tokens. Inside a token `~1` is `/` and
+ * `~0` is `~`, and nothing else may follow a `~`. On an array a token is an index: `0`, or digits with
+ * no leading zero. `-` names the slot past the end, so a read never finds it.
+ */
+
+namespace json;
+
+public enum PointerError
+{
+    /**
+     * `unflatten` was asked of something that is not an object.
+     */
+    case notObject;
+
+    /**
+     * The key is not a JSON Pointer: no leading `/`, or a `~` not followed by `0` or `1`.
+     */
+    case malformed(string $pointer);
+
+    /**
+     * The value under the key is a non-empty array or object. `flatten` only ever writes leaves.
+     */
+    case notLeaf(string $pointer);
+
+    /**
+     * The pointer runs through a place another key already holds a leaf at, such as `/a/b` beside
+     * `/a`. A pointer can end at a place or run through it, not both.
+     */
+    case conflict(string $pointer);
+
+    /**
+     * An index past the number of members in the flattened object. `flatten` never writes one, and
+     * the cap keeps a hostile `/a/99999999999` from filling memory with `null`s.
+     */
+    case outOfRange(string $pointer);
+
+    /**
+     * More than 128 tokens, the same cap `parse` puts on nesting.
+     */
+    case tooDeep(string $pointer);
+
+    /**
+     * What went wrong, in words, including the pointer.
+     */
+    public const function message() : string
+    {
+        return match ($this) {
+            PointerError::notObject => 'only an object can be unflattened',
+            PointerError::malformed($p) => "'{$p}' is not a JSON Pointer",
+            PointerError::notLeaf($p) => "'{$p}' holds a non-empty array or object",
+            PointerError::conflict($p) => "'{$p}' runs through a value that cannot hold it",
+            PointerError::outOfRange($p) => "'{$p}' indexes past the number of members",
+            PointerError::tooDeep($p) => "'{$p}' is nested too deep",
+        };
+    }
+}
+
+/**
+ * The unescaped tokens of `$pointer`, or Echo `null` when it is not one.
+ */
+function tokens(const string& $pointer) : array<string>?
+{
+    array<string> $out = array<string>();
+    usize $n = $pointer->size();
+
+    if ($n == 0) {
+        return $out;
+    }
+
+    if ($pointer->byte(0) != CH_SLASH) {
+        return null;
+    }
+
+    string $token = '';
+    usize $i = 1;
+
+    while ($i < $n) {
+        uint8 $b = $pointer->byte($i);
+
+        if ($b == CH_SLASH) {
+            $out[] = $token;
+            $token = '';
+        }
+        else if ($b == CH_TILDE) {
+            if ($i + 1 >= $n) {
+                return null;
+            }
+
+            uint8 $next = $pointer->byte($i + 1);
+
+            if ($next == CH_ZERO) {
+                $token->push(CH_TILDE);
+            }
+            else if ($next == CH_ONE) {
+                $token->push(CH_SLASH);
+            }
+            else {
+                return null;
+            }
+
+            $i = $i + 1;
+        }
+        else {
+            $token->push($b);
+        }
+
+        $i = $i + 1;
+    }
+
+    $out[] = $token;
+
+    return $out;
+}
+
+/**
+ * `$token` as a key inside a pointer: `~` becomes `~0` and `/` becomes `~1`.
+ */
+function escape(const string& $token) : string
+{
+    // `~` first, so the `~` in a `~1` is not escaped again
+    return str::replace(str::replace($token, '~', '~0'), '/', '~1');
+}
+
+/**
+ * `$token` read as an array index: `0`, or digits with no leading zero. Eighteen digits at most, so
+ * the value never overflows; no array is that long anyway.
+ */
+function index(const string& $token) : usize?
+{
+    usize $n = $token->size();
+
+    if ($n == 0 || $n > 18) {
+        return null;
+    }
+
+    if ($n > 1 && $token->byte(0) == CH_ZERO) {
+        return null;
+    }
+
+    usize $value = 0;
+    usize $i = 0;
+
+    while ($i < $n) {
+        uint8 $b = $token->byte($i);
+
+        if ($b < CH_ZERO || $b > CH_NINE) {
+            return null;
+        }
+
+        $value = $value * 10 + (($b - CH_ZERO) as usize);
+        $i = $i + 1;
+    }
+
+    return $value;
+}
+
+/**
+ * One segment of a `pick`: a key on an object, an index on an array, nothing on a scalar.
+ */
+function step(const Value& $cur, const string& $token) : Value?
+{
+    if (!$cur->isArray()) {
+        return $cur->get($token);
+    }
+
+    usize $i = guard index($token) else {
+        return null;
+    }
+
+    return $cur->at($i);
+}
+
+// ---- flatten ------------------------------------------------------------------------------------
+
+function flattenInto(Fields $out, const string& $prefix, const Value& $v) : void
+{
+    match ($v) {
+        Value::list($items) => {
+            flattenList($out, $prefix, $items);
+        },
+        Value::obj($fields) => {
+            flattenObject($out, $prefix, $fields);
+        },
+        else => {
+            $out->set($prefix, $v);
+        },
+    }
+}
+
+function flattenList(Fields $out, const string& $prefix, Items $items) : void
+{
+    usize $n = $items->count();
+
+    if ($n == 0) {
+        $out->set($prefix, Value::arr());
+
+        return;
+    }
+
+    usize $i = 0;
+
+    while ($i < $n) {
+        flattenInto($out, "{$prefix}/{$i}", $items->value($i));
+        $i = $i + 1;
+    }
+}
+
+function flattenObject(Fields $out, const string& $prefix, Fields $fields) : void
+{
+    if ($fields->count() == 0) {
+        $out->set($prefix, Value::object());
+
+        return;
+    }
+
+    foreach ($fields->keys() as const &$key) {
+        string $at = escape($key);
+
+        flattenInto($out, "{$prefix}/{$at}", $fields->value($key));
+    }
+}
+
+// ---- unflatten ----------------------------------------------------------------------------------
+
+/**
+ * One node of the tree `unflatten` grows: the leaf a key put here, or the tokens below it, never
+ * both. Whether the tokens below make an array or an object is only decided once every key is in,
+ * so the order of the keys does not change the tree.
+ */
+class Branch
+{
+    internal Value? $leaf;
+    internal ordered_map<string, Branch> $below;
+
+    internal constructor()
+    {
+        $this->leaf = null;
+        $this->below = ordered_map<string, Branch>();
+    }
+}
+
+function unflattenFields(Fields $fields) : result<Value, PointerError>
+{
+    Branch $root = Branch();
+
+    foreach ($fields->keys() as const &$pointer) {
+        Value $leaf = $fields->value($pointer);
+
+        if ($leaf->count() > 0) {
+            return .error(.notLeaf($pointer));
+        }
+
+        array<string> $path = guard tokens($pointer) else {
+            return .error(.malformed($pointer));
+        }
+
+        if ($path->count() > (MAX_DEPTH as usize)) {
+            return .error(.tooDeep($pointer));
+        }
+
+        if (shadowed($fields, $pointer)) {
+            return .error(.conflict($pointer));
+        }
+
+        grow($root, $path, $leaf->clone());
+    }
+
+    return assemble($root, '', $fields->count());
+}
+
+/**
+ * Whether another key of `$fields` ends where `$pointer` still runs on. Every `/` in a pointer starts
+ * a token, so the text in front of each one is a pointer to an ancestor.
+ */
+function shadowed(Fields $fields, const string& $pointer) : bool
+{
+    usize $n = $pointer->size();
+    usize $k = 0;
+
+    while ($k < $n) {
+        if ($pointer->byte($k) == CH_SLASH && $fields->has($pointer->sub(0, $k))) {
+            return true;
+        }
+
+        $k = $k + 1;
+    }
+
+    return false;
+}
+
+function grow(Branch $root, const array<string>& $path, Value $leaf) : void
+{
+    Branch $node = $root;
+
+    foreach ($path as const &$token) {
+        if (!$node->below->has($token)) {
+            $node->below->set($token, Branch());
+        }
+
+        $node = $node->below->get($token);
+    }
+
+    $node->leaf = $leaf;
+}
+
+/**
+ * The value `$node` stands for. Tokens that are all indexes make an array, with a gap filled by
+ * `null`; any other token makes an object. The root of an empty object is `null`.
+ */
+function assemble(Branch $node, const string& $pointer, usize $limit) : result<Value, PointerError>
+{
+    Value $leaf = guard $node->leaf else {
+        array<string> $tokens = $node->below->keys();
+
+        if ($tokens->empty()) {
+            return .ok(Value::nil());
+        }
+
+        array<usize> $at = guard indexes($tokens) else {
+            return assembleObject($node, $tokens, $pointer, $limit);
+        }
+
+        return assembleArray($node, $tokens, $at, $pointer, $limit);
+    }
+
+    return .ok($leaf);
+}
+
+function assembleObject(Branch $node, const array<string>& $tokens, const string& $pointer, usize $limit) : result<Value, PointerError>
+{
+    Fields $out = Fields();
+
+    foreach ($tokens as const &$token) {
+        string $at = escape($token);
+        Value $v = try assemble($node->below->get($token), "{$pointer}/{$at}", $limit);
+
+        $out->set($token, $v);
+    }
+
+    return .ok(Value::obj($out));
+}
+
+function assembleArray(Branch $node, const array<string>& $tokens, const array<usize>& $at, const string& $pointer, usize $limit) : result<Value, PointerError>
+{
+    Items $out = Items();
+    usize $n = $tokens->count();
+    usize $k = 0;
+
+    while ($k < $n) {
+        string $token = $tokens[$k];
+        string $below = "{$pointer}/{$token}";
+        usize $i = $at[$k];
+
+        if ($i >= $limit) {
+            return .error(.outOfRange($below));
+        }
+
+        Value $v = try assemble($node->below->get($token), $below, $limit);
+
+        while ($out->count() <= $i) {
+            $out->push(Value::nil());
+        }
+
+        $out->set($i, $v);
+        $k = $k + 1;
+    }
+
+    return .ok(Value::list($out));
+}
+
+/**
+ * Each token read as an index, or `null` when one is not.
+ */
+function indexes(const array<string>& $tokens) : array<usize>?
+{
+    array<usize> $out = arr::room<usize>($tokens->count());
+
+    foreach ($tokens as const &$token) {
+        usize $i = guard index($token) else {
+            return null;
+        }
+
+        $out[] = $i;
+    }
+
+    return $out;
+}

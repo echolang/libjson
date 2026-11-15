@@ -1,0 +1,56 @@
+/**
+ * A wire format other than JSON text, behind the same `Value`.
+ *
+ * `json::parse<bson>(bytes: $b)` and `json::dump<bson>(value: $v)` are the call sites. The label is
+ * not decoration: the generic and the text `parse(const string&)` would otherwise be one signature,
+ * and echoc refuses the second. A type argument alone does not set them apart either, since echoc
+ * drops one written at a call that resolves to a non-generic function.
+ *
+ * A format is a type with two statics. `bson` is the one this module ships; a msgpack or CBOR would
+ * be another conformer, and the call sites would not change shape.
+ *
+ * Unlike JSON text, a format can be narrower than the tree, so its `dump` returns a `result`.
+ */
+
+namespace json;
+
+public enum DumpError
+{
+    /**
+     * The root is not an object, and the format only writes documents.
+     */
+    case notObject;
+
+    /**
+     * A key holds a `0x00` byte, and the format ends its keys with one. The pointer names the member
+     * whose key it is.
+     */
+    case nulByte(string $pointer);
+
+    /**
+     * What went wrong, in words, including the pointer.
+     */
+    public const function message() : string
+    {
+        return match ($this) {
+            DumpError::notObject => 'only an object can be the root',
+            DumpError::nulByte($p) => "'{$p}' has a key with a 0x00 byte",
+        };
+    }
+}
+
+public interface Format
+{
+    static function parse(const string& $bytes) : result<Value, Error>;
+    static function dump(Value $v) : result<string, DumpError>;
+}
+
+public function parse<F : Format>(bytes: const string& $bytes) : result<Value, Error>
+{
+    return F::parse($bytes);
+}
+
+public function dump<F : Format>(value: Value $v) : result<string, DumpError>
+{
+    return F::dump($v);
+}
